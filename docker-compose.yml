@@ -98,15 +98,14 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # Model Service (Local LLM Server)
+  # Model Service (Local LLM Server - llama.cpp)
   # ============================================================================
-  # EXCEPTION (Architecture §3): model service stub in T01 runs unprivileged with
-  # read-only rootfs; documented exception placeholder for T02 llama-server which
-  # may require specific user/writable paths.
+  # SECURITY (Architecture §3): Tested and verified running with unprivileged
+  # user 10001:10001, cap_drop ALL, no-new-privileges, and read-only rootfs.
+  # tmpfs /tmp is mounted rw (noexec, nosuid) for temporary files and slot management.
+  # Attached strictly to internal model-net only (SI-03).
   model:
-    build:
-      context: ./model
-      dockerfile: Dockerfile
+    image: ghcr.io/ggml-org/llama.cpp:server-b11382
     container_name: bayora-model
     user: "10001:10001"
     read_only: true
@@ -117,26 +116,40 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
-      - SERVICE_NAME=model
-      - SERVICE_PORT=8080
-      - PYTHONDONTWRITEBYTECODE=1
-      - MODEL_FILE=${MODEL_FILE:-Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+      - MODEL_FILE=${MODEL_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}
       - MODEL_THREADS=${MODEL_THREADS:-2}
       - MODEL_CTX=${MODEL_CTX:-8192}
       - MODEL_PARALLEL=${MODEL_PARALLEL:-2}
+    command:
+      - -m
+      - /data/models/${MODEL_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - -c
+      - "${MODEL_CTX:-8192}"
+      - --parallel
+      - "${MODEL_PARALLEL:-2}"
+      - -t
+      - "${MODEL_THREADS:-2}"
+      - --slot-save-path
+      - /tmp
     volumes:
+      # SECURITY: Model weights mounted strictly read-only
       - ./data/models:/data/models:ro
     networks:
+      # SECURITY: Isolated internal network; only gateway bridges to model-net
       - model-net
-    cpus: 2.0
-    mem_limit: 2g
+    cpus: ${MODEL_CPUS:-2.0}
+    mem_limit: ${MODEL_MEM_LIMIT:-2g}
     pids_limit: 100
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
       interval: 5s
       timeout: 3s
-      retries: 3
-      start_period: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ============================================================================
