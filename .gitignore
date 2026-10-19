@@ -37,3 +37,9 @@ node_modules/
 *.swp
 *.swo
 *~
+
+# Agent instructions and rules
+/AGENTS.md
+
+# Project documentation and specifications
+/docs/
