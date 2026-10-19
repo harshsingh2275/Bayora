@@ -14,7 +14,8 @@
     }
 
     # SECURITY (SI-11): Reject tenant endpoints through web with 404
-    handle /v1/* {
+    @v1 path /v1 /v1/*
+    handle @v1 {
         respond "Not Found" 404
     }
 
@@ -24,4 +25,5 @@
         file_server
         try_files {path} /index.html
     }
+
 }

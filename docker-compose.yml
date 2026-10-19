@@ -26,8 +26,9 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
-      - XDG_DATA_HOME=/tmp/data
-      - XDG_CONFIG_HOME=/tmp/config
+      - XDG_DATA_HOME=/data
+      - XDG_CONFIG_HOME=/config
+      - PYTHONDONTWRITEBYTECODE=1
     volumes:
       - caddy-data:/data:rw
       - caddy-config:/config:rw

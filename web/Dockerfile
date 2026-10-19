@@ -21,3 +21,5 @@ EXPOSE 8080
 # SECURITY: Healthcheck using Python standard library
 HEALTHCHECK --interval=5s --timeout=3s --retries=3 --start-period=5s \
     CMD ["python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+
+ENV PYTHONDONTWRITEBYTECODE=1
