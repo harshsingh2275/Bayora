@@ -8,3 +8,5 @@ htmlcov
 secrets/
 data/models/
 data/raw/
+.venv/
+tests/

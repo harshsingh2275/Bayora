@@ -1,0 +1,11 @@
+# Gateway dependencies - pinned exact versions (SI-10, AGENTS.md §4)
+# Verified: all packages available on PyPI as of 2026-10-20
+
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.9.2
+httpx==0.27.2
+aiosqlite==0.20.0
+starlette==0.41.2
+
+# No extra deps added beyond the approved list (AGENTS.md §4)
