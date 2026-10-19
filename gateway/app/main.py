@@ -21,10 +21,10 @@ from fastapi.responses import JSONResponse
 
 from .config import DEFAULT_CACHE_MODE
 from .database import get_setting, init_db, set_setting
-from .logger_client import FailClosedStub
+from .logger_client import RealLoggerClient, set_logger_client
 from .models import HealthResponse
 from .rate_limit import check_public_rate
-from .routes import admin, probe, run_lifecycle, work
+from .routes import admin, audit, probe, run_lifecycle, work
 
 # ── Structured JSON logging ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -48,11 +48,22 @@ async def lifespan(app: FastAPI):
     if current_mode is None:
         await set_setting(app.state.db, "cache_mode", DEFAULT_CACHE_MODE)
 
-    # SECURITY SI-07: Logger client stored in app.state.
-    # Default is FailClosedStub — every audit call returns 503 until T04
-    # calls set_logger_client() with the real implementation.
-    app.state.logger_client = FailClosedStub()
+    # SECURITY SI-07: RealLoggerClient connecting to logger service on log-net.
+    # Fails closed (503) if logger is unavailable.
+    app.state.logger_client = RealLoggerClient()
+    set_logger_client(app.state.logger_client)
     log.info({"event": "logger_client_set", "type": type(app.state.logger_client).__name__})
+
+    # SECURITY SI-08: Log gateway_started audit event
+    try:
+        await app.state.logger_client.append(
+            run_id=None,
+            actor="gateway",
+            event="gateway_started",
+            data={},
+        )
+    except Exception as err:
+        log.warning({"event": "gateway_started_audit_notice", "detail": str(err)})
 
     yield  # Application runs
 
@@ -77,6 +88,7 @@ app.include_router(probe.router)
 app.include_router(work.router)
 app.include_router(run_lifecycle.router)
 app.include_router(admin.router)
+app.include_router(audit.router)
 
 
 # ── Health endpoints ──────────────────────────────────────────────────────────

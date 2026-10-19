@@ -135,23 +135,22 @@ except e.HTTPError as err:
     assert out["status"] == 422
 
 
-def test_real_container_probe_returns_503_fail_closed_with_stub():
+def test_real_container_probe_succeeds_with_real_logger():
     code = """
-import urllib.request as u, urllib.error as e, json
+import urllib.request as u, json
 token = open("/run/secrets/red_token").read().strip()
 payload = json.dumps({"prompt": "hi", "max_tokens": 10}).encode()
 req = u.Request("http://gateway:8000/v1/red/probe", data=payload, method="POST")
 req.add_header("Authorization", f"Bearer {token}")
 req.add_header("Content-Type", "application/json")
-try:
-    res = u.urlopen(req)
-    print(json.dumps({"status": res.status}))
-except e.HTTPError as err:
-    print(json.dumps({"status": err.code, "body": err.read().decode()}))
+res = u.urlopen(req)
+body = json.loads(res.read().decode())
+print(json.dumps({"status": res.status, "body": body}))
 """
     out = _exec_in_container("red", code)
-    assert out["status"] == 503
-    assert "fail-closed" in out["body"].lower()
+    assert out["status"] == 200
+    assert "text" in out["body"]
+    assert set(out["body"].keys()) == {"text"}
 
 
 def test_web_proxy_blocks_v1_and_allows_api():

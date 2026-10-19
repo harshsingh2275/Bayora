@@ -338,6 +338,7 @@ async def test_set_cache_mode_invalid_value_returns_422(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_set_cache_mode_with_admin_token(client: AsyncClient):
     """Valid admin token → 200, mode updated."""
+    _install_noop_logger(client)
     resp = await client.post(
         "/api/admin/cache-mode",
         json={"mode": "shared"},

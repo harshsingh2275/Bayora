@@ -16,7 +16,8 @@ from fastapi.responses import JSONResponse
 
 from ..auth import require_admin
 from ..database import get_setting, set_setting
-from ..deps import get_db
+from ..deps import get_db, get_logger
+from ..logger_client import LoggerClient
 from ..models import CacheModeRequest, CacheModeResponse, CreateRunRequest, CreateRunResponse
 from ..rate_limit import check_public_rate
 
@@ -42,9 +43,17 @@ async def set_cache_mode(
     body: CacheModeRequest,
     _auth: None = Depends(require_admin),
     db: aiosqlite.Connection = Depends(get_db),
+    logger: LoggerClient = Depends(get_logger),
 ) -> CacheModeResponse:
     """Operator: set cache mode (isolated | shared)."""
     await set_setting(db, "cache_mode", body.mode)
+    # SECURITY SI-07/SI-08: Log cache_mode_changed event to audit chain
+    await logger.append(
+        run_id=None,
+        actor="operator",
+        event="cache_mode_changed",
+        data={"mode": body.mode},
+    )
     log.info({"event": "cache_mode_changed", "mode": body.mode})
     return CacheModeResponse(mode=body.mode)
 
