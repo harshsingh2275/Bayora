@@ -1,0 +1,27 @@
+{
+    admin off
+}
+
+:8080 {
+    # Health check endpoint for container healthcheck
+    handle /health {
+        respond "OK" 200
+    }
+
+    # SECURITY (SI-11): Reverse proxy ONLY /api/* to the gateway
+    handle /api/* {
+        reverse_proxy gateway:8000
+    }
+
+    # SECURITY (SI-11): Reject tenant endpoints through web with 404
+    handle /v1/* {
+        respond "Not Found" 404
+    }
+
+    # Static site fallback
+    handle {
+        root * /srv
+        file_server
+        try_files {path} /index.html
+    }
+}

@@ -1,0 +1,39 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# Data directory (only blue bundles and data/README.md are committed)
+data/*
+!data/blue/
+data/blue/*
+!data/blue/bundles/
+data/blue/bundles/*
+!data/blue/bundles/*.json
+!data/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Node / Vite
+node_modules/
+.vite/
+
+# System and editor
+.DS_Store
+*.swp
+*.swo
+*~

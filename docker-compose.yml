@@ -1,0 +1,339 @@
+# docker-compose.yml: Development compose definition for Bayora
+# SECURITY: Baseline hardening rules (SI-01..SI-04, architecture §2, §3, §4)
+# - No container is privileged, no host networking/PID/devices, no docker.sock mounts
+# - Custom containers: user 10001:10001, cap_drop ALL, no-new-privileges, read_only rootfs with tmpfs /tmp
+# - Internal networks (red-net, blue-net, model-net, log-net) have internal: true (no internet, no host routing)
+# - Only gateway bridges multiple networks; only web publishes ports to host
+
+services:
+  # ============================================================================
+  # Public Web Proxy & UI (Caddy)
+  # ============================================================================
+  # EXCEPTION (Architecture §3): web runs Caddy, uses tmpfs /tmp with XDG dirs
+  # and named volumes caddy-data/caddy-config for Caddy configuration and state.
+  # In dev, binds :8080 unprivileged without NET_BIND_SERVICE.
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: bayora-web
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - XDG_DATA_HOME=/tmp/data
+      - XDG_CONFIG_HOME=/tmp/config
+    volumes:
+      - caddy-data:/data:rw
+      - caddy-config:/config:rw
+    ports:
+      - "${WEB_BIND:-127.0.0.1:8088}:8080"
+    networks:
+      - front-net
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Gateway Service (Sole hub bridging tenants, model, and logger)
+  # ============================================================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: bayora-gateway
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=gateway
+      - SERVICE_PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1
+      - DEFAULT_CACHE_MODE=${DEFAULT_CACHE_MODE:-isolated}
+      - MAX_ATTACKS=${MAX_ATTACKS:-100}
+      - ATTACK_MAX_TOKENS=${ATTACK_MAX_TOKENS:-96}
+      - RUN_TIMEOUT_SECONDS=${RUN_TIMEOUT_SECONDS:-600}
+      - RATE_LIMIT_PUBLIC_PER_MIN=${RATE_LIMIT_PUBLIC_PER_MIN:-60}
+      - RATE_LIMIT_TENANT_PER_SEC=${RATE_LIMIT_TENANT_PER_SEC:-10}
+    volumes:
+      - gateway-data:/app/data:rw
+    secrets:
+      - red_token_sha256
+      - blue_token_sha256
+      - admin_token_sha256
+      - logger_token
+    networks:
+      - front-net
+      - red-net
+      - blue-net
+      - model-net
+      - log-net
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Model Service (Local LLM Server)
+  # ============================================================================
+  # EXCEPTION (Architecture §3): model service stub in T01 runs unprivileged with
+  # read-only rootfs; documented exception placeholder for T02 llama-server which
+  # may require specific user/writable paths.
+  model:
+    build:
+      context: ./model
+      dockerfile: Dockerfile
+    container_name: bayora-model
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=model
+      - SERVICE_PORT=8080
+      - PYTHONDONTWRITEBYTECODE=1
+      - MODEL_FILE=${MODEL_FILE:-Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+      - MODEL_THREADS=${MODEL_THREADS:-2}
+      - MODEL_CTX=${MODEL_CTX:-8192}
+      - MODEL_PARALLEL=${MODEL_PARALLEL:-2}
+    volumes:
+      - ./data/models:/data/models:ro
+    networks:
+      - model-net
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Audit Logger Service (Sole writer of append-only hash-chained audit log)
+  # ============================================================================
+  logger:
+    build:
+      context: ./logger
+      dockerfile: Dockerfile
+    container_name: bayora-logger
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=logger
+      - SERVICE_PORT=8001
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - log-data:/app/log-data:rw
+    secrets:
+      - logger_token
+      - log_signing_key
+    networks:
+      - log-net
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Verifier Service (Independent audit log verification)
+  # ============================================================================
+  verifier:
+    build:
+      context: ./verifier
+      dockerfile: Dockerfile
+    container_name: bayora-verifier
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=verifier
+      - SERVICE_PORT=8002
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - log-data:/app/log-data:ro
+    secrets:
+      - trusted_pubkey.pem
+    networks:
+      - log-net
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8002/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Red Team Tenant Service
+  # ============================================================================
+  red:
+    build:
+      context: ./red
+      dockerfile: Dockerfile
+    container_name: bayora-red
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=red
+      - SERVICE_PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ./data/red:/data/red:ro
+    secrets:
+      - red_token
+    networks:
+      - red-net
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Blue Team Tenant Service
+  # ============================================================================
+  blue:
+    build:
+      context: ./blue
+      dockerfile: Dockerfile
+    container_name: bayora-blue
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - SERVICE_NAME=blue
+      - SERVICE_PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ./data/blue:/data/blue:ro
+    secrets:
+      - blue_token
+    networks:
+      - blue-net
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+# ==============================================================================
+# Isolated Networks (Hub-and-spoke topology per architecture §2)
+# ==============================================================================
+networks:
+  # Only web and gateway live on front-net
+  front-net:
+    driver: bridge
+  # internal: true blocks outbound internet and direct external access
+  red-net:
+    driver: bridge
+    internal: true
+  blue-net:
+    driver: bridge
+    internal: true
+  model-net:
+    driver: bridge
+    internal: true
+  log-net:
+    driver: bridge
+    internal: true
+
+# ==============================================================================
+# Storage Volumes per architecture §4
+# ==============================================================================
+volumes:
+  gateway-data:
+  log-data:
+  caddy-data:
+  caddy-config:
+
+# ==============================================================================
+# Secrets mounted at /run/secrets/<name> per architecture §4
+# ==============================================================================
+secrets:
+  red_token:
+    file: ./secrets/red_token
+  red_token_sha256:
+    file: ./secrets/red_token_sha256
+  blue_token:
+    file: ./secrets/blue_token
+  blue_token_sha256:
+    file: ./secrets/blue_token_sha256
+  admin_token_sha256:
+    file: ./secrets/admin_token_sha256
+  logger_token:
+    file: ./secrets/logger_token
+  log_signing_key:
+    file: ./secrets/log_signing_key
+  trusted_pubkey.pem:
+    file: ./verifier/trusted_pubkey.pem
