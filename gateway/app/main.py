@@ -16,13 +16,14 @@ SECURITY notes:
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
 from .config import DEFAULT_CACHE_MODE
 from .database import get_setting, init_db, set_setting
 from .logger_client import FailClosedStub
 from .models import HealthResponse
+from .rate_limit import check_public_rate
 from .routes import admin, probe, run_lifecycle, work
 
 # ── Structured JSON logging ───────────────────────────────────────────────────
@@ -78,10 +79,21 @@ app.include_router(run_lifecycle.router)
 app.include_router(admin.router)
 
 
-# ── Health endpoint (public, no auth) ────────────────────────────────────────
+# ── Health endpoints ──────────────────────────────────────────────────────────
+# Internal healthcheck for Docker (no rate limit to prevent healthcheck flapping)
 @app.get("/health", response_model=HealthResponse)
-@app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
+    """SECURITY SI-10: No sensitive data in health response."""
+    return HealthResponse(status="ok")
+
+
+# Public health endpoint (rate limited per architecture §5)
+@app.get(
+    "/api/health",
+    response_model=HealthResponse,
+    dependencies=[Depends(check_public_rate)],
+)
+async def api_health() -> HealthResponse:
     """SECURITY SI-10: No sensitive data in health response."""
     return HealthResponse(status="ok")
 

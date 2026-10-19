@@ -9,7 +9,7 @@ SECURITY: Auth dependencies enforce role isolation on every endpoint.
 """
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from ..auth import require_blue, require_red
@@ -19,6 +19,7 @@ from ..models import (
     DefenseRequest,
     DoneRequest,
 )
+from ..rate_limit import check_tenant_rate
 
 log = logging.getLogger("gateway.routes.run_lifecycle")
 
@@ -38,6 +39,7 @@ async def red_commit(
     _auth: None = Depends(require_red),
 ) -> JSONResponse:
     """Red team commit endpoint.  Returns 501 until T05."""
+    await check_tenant_rate("red")
     return _NOT_IMPLEMENTED
 
 
@@ -49,6 +51,7 @@ async def blue_defense(
     _auth: None = Depends(require_blue),
 ) -> JSONResponse:
     """Blue team defense bundle upload.  Returns 501 until T05."""
+    await check_tenant_rate("blue")
     return _NOT_IMPLEMENTED
 
 
@@ -60,6 +63,7 @@ async def red_attack(
     _auth: None = Depends(require_red),
 ) -> JSONResponse:
     """Red team attack endpoint.  Returns 501 until T05."""
+    await check_tenant_rate("red")
     return _NOT_IMPLEMENTED
 
 
@@ -71,6 +75,7 @@ async def red_done(
     _auth: None = Depends(require_red),
 ) -> JSONResponse:
     """Red team done endpoint.  Returns 501 until T05."""
+    await check_tenant_rate("red")
     return _NOT_IMPLEMENTED
 
 
@@ -81,6 +86,7 @@ async def red_report(
     _auth: None = Depends(require_red),
 ) -> JSONResponse:
     """Red team report.  Returns 501 until T05."""
+    await check_tenant_rate("red")
     return _NOT_IMPLEMENTED
 
 
@@ -89,5 +95,9 @@ async def blue_report(
     run_id: str,
     _auth: None = Depends(require_blue),
 ) -> JSONResponse:
-    """Blue team report.  Returns 501 until T05."""
-    return _NOT_IMPLEMENTED
+    """Blue team report. Sealed until run conclusion per §5."""
+    # SECURITY: §5 - Blue cannot read report before conclusion (sealed data)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Run report is sealed until conclusion",
+    )

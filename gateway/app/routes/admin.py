@@ -18,6 +18,7 @@ from ..auth import require_admin
 from ..database import get_setting, set_setting
 from ..deps import get_db
 from ..models import CacheModeRequest, CacheModeResponse, CreateRunRequest, CreateRunResponse
+from ..rate_limit import check_public_rate
 
 log = logging.getLogger("gateway.routes.admin")
 
@@ -25,7 +26,11 @@ router = APIRouter()
 
 
 # ── Cache-mode control ────────────────────────────────────────────────────────
-@router.get("/api/cache-mode", response_model=CacheModeResponse)
+@router.get(
+    "/api/cache-mode",
+    response_model=CacheModeResponse,
+    dependencies=[Depends(check_public_rate)],
+)
 async def get_cache_mode(db: aiosqlite.Connection = Depends(get_db)) -> CacheModeResponse:
     """Public: current cache mode."""
     mode = await get_setting(db, "cache_mode") or "isolated"

@@ -49,10 +49,11 @@ class TokenBucket:
 _tenant_buckets: dict[str, TokenBucket] = {}
 
 def _get_tenant_bucket(role: str) -> TokenBucket:
+    from .config import RATE_LIMIT_TENANT_PER_SEC
     if role not in _tenant_buckets:
         _tenant_buckets[role] = TokenBucket(
             rate=RATE_LIMIT_TENANT_PER_SEC,
-            capacity=RATE_LIMIT_TENANT_PER_SEC * 5,  # burst up to 5s worth
+            capacity=float(RATE_LIMIT_TENANT_PER_SEC),
         )
     return _tenant_buckets[role]
 
@@ -69,6 +70,7 @@ async def check_tenant_rate(role: str) -> None:
 _public_buckets: dict[str, TokenBucket] = {}
 
 def _get_public_bucket(ip: str) -> TokenBucket:
+    from .config import RATE_LIMIT_PUBLIC_PER_MIN
     if ip not in _public_buckets:
         rate_per_sec = RATE_LIMIT_PUBLIC_PER_MIN / 60.0
         _public_buckets[ip] = TokenBucket(rate=rate_per_sec, capacity=rate_per_sec * 10)
