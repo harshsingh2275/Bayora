@@ -195,7 +195,16 @@ except e.HTTPError as err:
     finally:
         # 2. Restart logger and wait for healthy
         subprocess.run(["docker", "compose", "start", "logger"], check=True)
-        time.sleep(3)
+        for _ in range(20):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8088/api/health", timeout=1.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode())
+                        if data.get("services", {}).get("logger") is True:
+                            break
+            except Exception:
+                pass
+            time.sleep(0.5)
 
 
 def test_no_raw_prompt_in_audit_log():

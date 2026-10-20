@@ -61,6 +61,8 @@ services:
       - ALL
     security_opt:
       - "no-new-privileges:true"
+      # SECURITY: Stricter seccomp profile denying ptrace, keyctl, personality changes, userfaultfd (SI-02, stretch X-01)
+      - "seccomp:./security/seccomp-tenant.json"
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
@@ -241,6 +243,8 @@ services:
       - ALL
     security_opt:
       - "no-new-privileges:true"
+      # SECURITY: Stricter tenant seccomp profile denying ptrace, keyctl, personality changes, userfaultfd (SI-02, stretch X-01)
+      - "seccomp:./security/seccomp-tenant.json"
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
@@ -278,6 +282,8 @@ services:
       - ALL
     security_opt:
       - "no-new-privileges:true"
+      # SECURITY: Stricter tenant seccomp profile denying ptrace, keyctl, personality changes, userfaultfd (SI-02, stretch X-01)
+      - "seccomp:./security/seccomp-tenant.json"
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
