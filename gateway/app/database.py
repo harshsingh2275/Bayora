@@ -51,15 +51,37 @@ CREATE TABLE IF NOT EXISTS bundles (
 );
 
 -- attacks: per-attack records (sealed until conclusion)
--- SECURITY SI-08: prompt_digest and response_digest only; no raw text
+-- SECURITY SI-08: prompt_digest and response_digest only logged mid-run; raw text stored sealed
 CREATE TABLE IF NOT EXISTS attacks (
     run_id          TEXT NOT NULL REFERENCES runs(run_id),
     idx             INTEGER NOT NULL,
     prompt_digest   TEXT NOT NULL,   -- SHA-256 hex
-    response_digest TEXT,            -- SHA-256 hex (set on conclusion)
+    response_digest TEXT,            -- SHA-256 hex
     outcome         TEXT,            -- blocked_input | blocked_output | refused | complied | error
     latency_ms      REAL,
+    prompt          TEXT,            -- full prompt text (sealed)
+    response_text   TEXT,            -- model response or refusal text (sealed)
+    rule_id         TEXT,            -- rule id that triggered block, or NULL
+    created_at      TEXT,
     PRIMARY KEY (run_id, idx)
+);
+
+-- red_committed_digests: individual prompt digests committed by red team
+CREATE TABLE IF NOT EXISTS red_committed_digests (
+    run_id TEXT NOT NULL REFERENCES runs(run_id),
+    idx    INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    PRIMARY KEY (run_id, idx)
+);
+
+-- run_results: sealed results revealed after run conclusion
+CREATE TABLE IF NOT EXISTS run_results (
+    run_id         TEXT PRIMARY KEY REFERENCES runs(run_id),
+    results_json   TEXT NOT NULL,
+    results_digest TEXT NOT NULL,
+    total          INTEGER NOT NULL,
+    asr            REAL NOT NULL,
+    concluded_at   TEXT NOT NULL
 );
 
 -- settings: key-value store for runtime configuration
@@ -81,6 +103,17 @@ async def init_db() -> aiosqlite.Connection:
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
     await conn.executescript(_SCHEMA)
+    # Ensure sealed columns exist on attacks if table was created previously
+    for col, col_type in [
+        ("prompt", "TEXT"),
+        ("response_text", "TEXT"),
+        ("rule_id", "TEXT"),
+        ("created_at", "TEXT"),
+    ]:
+        try:
+            await conn.execute(f"ALTER TABLE attacks ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     await conn.commit()
     log.info({"event": "db_initialized", "path": DB_PATH})
     return conn

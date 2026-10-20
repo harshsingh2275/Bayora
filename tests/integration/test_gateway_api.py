@@ -374,12 +374,12 @@ async def test_blue_work_no_run_returns_null(client: AsyncClient):
     assert resp.json() == {"run": None}
 
 
-# ── Run lifecycle stubs return 501 ────────────────────────────────────────────
+# ── Run lifecycle endpoints (T05) ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_commit_returns_501(client: AsyncClient):
+async def test_commit_nonexistent_run_returns_404(client: AsyncClient):
     resp = await client.post(
-        "/v1/red/runs/test-run/commit",
+        "/v1/red/runs/nonexistent-run/commit",
         json={
             "count": 1,
             "digests": ["a" * 64],
@@ -387,13 +387,13 @@ async def test_commit_returns_501(client: AsyncClient):
         },
         headers={"Authorization": f"Bearer {RED_PLAIN}"},
     )
-    assert resp.status_code == 501
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_defense_returns_501(client: AsyncClient):
+async def test_defense_nonexistent_run_returns_404(client: AsyncClient):
     resp = await client.put(
-        "/v1/blue/runs/test-run/defense",
+        "/v1/blue/runs/nonexistent-run/defense",
         json={
             "bundle": {
                 "version": "hardened-v1",
@@ -404,7 +404,7 @@ async def test_defense_returns_501(client: AsyncClient):
         },
         headers={"Authorization": f"Bearer {BLUE_PLAIN}"},
     )
-    assert resp.status_code == 501
+    assert resp.status_code == 404
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

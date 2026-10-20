@@ -9,7 +9,9 @@ SECURITY invariants enforced at the schema layer:
 """
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+import regex
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 
 # ── Shared base: SECURITY SI-06 – every request forbids extra fields ─────────
 class StrictBase(BaseModel):
@@ -62,6 +64,16 @@ class BundleRule(StrictBase):
     pattern: Annotated[str, Field(max_length=200)]
     action: Literal["block"]
 
+    @model_validator(mode="after")
+    def validate_pattern(self) -> "BundleRule":
+        # SECURITY SI-09: Validate regex syntax during upload; never execute
+        if self.type == "regex":
+            try:
+                regex.compile(self.pattern)
+            except Exception as e:
+                raise ValueError(f"Invalid regex pattern: {e}") from e
+        return self
+
 
 class DefenseBundle(StrictBase):
     """SECURITY SI-09: Bundle is data, validated here, never executed."""
@@ -69,6 +81,13 @@ class DefenseBundle(StrictBase):
     input_rules: Annotated[list[BundleRule], Field(max_length=200)]
     output_rules: Annotated[list[BundleRule], Field(max_length=200)]
     refusal_text: Annotated[str, Field(max_length=200)]
+
+    @model_validator(mode="after")
+    def validate_total_rules(self) -> "DefenseBundle":
+        # Architecture §7: At most 200 rules total across input and output
+        if len(self.input_rules) + len(self.output_rules) > 200:
+            raise ValueError("Total rules across input and output cannot exceed 200")
+        return self
 
 
 class DefenseRequest(StrictBase):
@@ -102,6 +121,71 @@ class DoneResponse(BaseModel):
     ok: bool = True
 
 
+# ── Reports (/v1/red/runs/{run_id}/report, /v1/blue/runs/{run_id}/report) ────
+
+class RedAttackReport(BaseModel):
+    """SECURITY §5 asymmetry: Red gets per-attack outcome only (no rule ids, no responses)."""
+    idx: int
+    outcome: str
+
+
+class RedReportResponse(BaseModel):
+    run_id: str
+    state: str
+    total: int
+    asr: float
+    attacks: list[RedAttackReport]
+
+
+class BlueAttackReport(BaseModel):
+    """SECURITY §5 asymmetry: Blue gets full details (prompt, outcome, rule_id, response)."""
+    idx: int
+    prompt: str
+    outcome: str
+    rule_id: str | None = None
+    response_text: str
+    latency_ms: float | None = None
+
+
+class BlueReportResponse(BaseModel):
+    run_id: str
+    state: str
+    total: int
+    asr: float
+    attacks: list[BlueAttackReport]
+
+
+# ── Results (/api/runs/{run_id}/results) ──────────────────────────────────────
+
+class RunResultAttackItem(BaseModel):
+    """SECURITY §5: Prompt preview max 80 chars, outcome, latency; no full response, no rule_id."""
+    idx: int
+    prompt_digest: str
+    prompt_preview: str
+    outcome: str
+    latency_ms: float | None = None
+
+
+class RunResultsResponse(BaseModel):
+    run_id: str
+    total: int
+    aggregate: dict[str, int]
+    asr: float
+    attacks: list[RunResultAttackItem]
+
+
+# ── Admin item detail (/api/admin/runs/{run_id}/items/{idx}) ──────────────────
+
+class OperatorRunItemResponse(BaseModel):
+    run_id: str
+    idx: int
+    prompt: str
+    response_text: str
+    outcome: str
+    rule_id: str | None = None
+    latency_ms: float | None = None
+
+
 # ── Admin: create run (/api/runs POST) ────────────────────────────────────────
 
 class CreateRunRequest(StrictBase):
@@ -114,6 +198,26 @@ class CreateRunRequest(StrictBase):
 class CreateRunResponse(BaseModel):
     run_id: str
     state: str
+
+
+class AbortRunResponse(BaseModel):
+    run_id: str
+    state: str
+
+
+class RunDetailResponse(BaseModel):
+    run_id: str
+    name: str
+    state: str
+    attack_count: int
+    seed: int
+    bundle_name: str
+    created_at: str
+    updated_at: str
+    red_committed: bool = False
+    blue_committed: bool = False
+    set_digest: str | None = None
+    bundle_digest: str | None = None
 
 
 # ── Admin: cache mode (/api/admin/cache-mode POST) ───────────────────────────
