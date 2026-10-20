@@ -20,17 +20,20 @@ sync-agents:
 	./scripts/sync-agents.sh
 
 lint:
-	@$(PYTHON) -m py_compile $$(find gateway logger verifier red blue scripts tests -name '*.py')
+	@$(PYTHON) -m py_compile $$(find gateway logger verifier red blue breakit scripts tests -name '*.py')
 	@echo "lint: python syntax ok"
 
 test:
 	$(PYTEST) tests/unit tests/integration -v
 
 test-security:
-	@echo "test-security: not implemented yet (T09)"
+	@docker compose pause red blue >/dev/null 2>&1 || true
+	@$(PYTEST) tests/security -v; status=$$?; \
+	docker compose unpause red blue >/dev/null 2>&1 || true; \
+	exit $$status
 
 breakit:
-	@echo "breakit: not implemented yet (T09)"
+	$(PYTHON) -m breakit.harness
 
 timing:
 	$(PYTHON) experiments/timing/run.py

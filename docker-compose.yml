@@ -232,8 +232,8 @@ services:
   # ============================================================================
   red:
     build:
-      context: ./red
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: red/Dockerfile
     container_name: bayora-red
     user: "10001:10001"
     read_only: true
@@ -269,8 +269,8 @@ services:
   # ============================================================================
   blue:
     build:
-      context: ./blue
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: blue/Dockerfile
     container_name: bayora-blue
     user: "10001:10001"
     read_only: true

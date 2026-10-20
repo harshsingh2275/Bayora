@@ -6,7 +6,8 @@ RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /sbin/nologin -M appuser
 
 WORKDIR /app
-COPY . /app
+COPY blue/ /app/
+COPY breakit/ /app/breakit/
 
 # Ensure mount point exists and provide symlink for /data/bundles
 RUN mkdir -p /data/blue && ln -s /data/blue/bundles /data/bundles

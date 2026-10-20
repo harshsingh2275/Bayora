@@ -6,7 +6,8 @@ RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /sbin/nologin -M appuser
 
 WORKDIR /app
-COPY . /app
+COPY red/ /app/
+COPY breakit/ /app/breakit/
 
 # Ensure mount point exists and provide symlink for /data/pool.jsonl
 RUN mkdir -p /data/red && ln -s /data/red/pool.jsonl /data/pool.jsonl
