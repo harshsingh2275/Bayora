@@ -77,7 +77,7 @@ class BundleRule(StrictBase):
 
 class DefenseBundle(StrictBase):
     """SECURITY SI-09: Bundle is data, validated here, never executed."""
-    version: Literal["hardened-v1"]
+    version: Literal["baseline-v1", "hardened-v1"]
     input_rules: Annotated[list[BundleRule], Field(max_length=200)]
     output_rules: Annotated[list[BundleRule], Field(max_length=200)]
     refusal_text: Annotated[str, Field(max_length=200)]

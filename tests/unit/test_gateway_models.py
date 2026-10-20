@@ -144,6 +144,26 @@ class TestDefenseBundle:
             refusal_text="Blocked.",
         )
 
+    def test_valid_bundle_baseline(self):
+        DefenseBundle(
+            version="baseline-v1",
+            input_rules=[self._valid_rule()],
+            output_rules=[],
+            refusal_text="Blocked.",
+        )
+
+    def test_actual_bundle_files(self):
+        import json
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        for name in ("baseline.json", "hardened.json"):
+            path = repo_root / "data" / "blue" / "bundles" / name
+            assert path.is_file(), f"Bundle file missing: {path}"
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            bundle = DefenseBundle.model_validate(data)
+            assert bundle.refusal_text
+
     def test_invalid_version_rejected(self):
         with pytest.raises(ValidationError):
             DefenseBundle(

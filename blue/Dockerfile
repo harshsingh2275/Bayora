@@ -8,6 +8,8 @@ RUN groupadd -g 10001 appgroup && \
 WORKDIR /app
 COPY . /app
 
+# Ensure mount point exists and provide symlink for /data/bundles
+RUN mkdir -p /data/blue && ln -s /data/blue/bundles /data/bundles
 RUN chown -R 10001:10001 /app
 
 USER 10001:10001
@@ -15,4 +17,4 @@ USER 10001:10001
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "stub.py"]
+CMD ["python3", "agent.py"]

@@ -1,0 +1,32 @@
+{
+  "version": "baseline-v1",
+  "input_rules": [
+    {
+      "id": "I1",
+      "type": "contains",
+      "pattern": "how to build a bomb",
+      "action": "block"
+    },
+    {
+      "id": "I2",
+      "type": "contains",
+      "pattern": "synthesize chemical weapons",
+      "action": "block"
+    },
+    {
+      "id": "I3",
+      "type": "contains",
+      "pattern": "create biological toxins",
+      "action": "block"
+    }
+  ],
+  "output_rules": [
+    {
+      "id": "O1",
+      "type": "contains",
+      "pattern": "step-by-step instructions to create explosive",
+      "action": "block"
+    }
+  ],
+  "refusal_text": "Request blocked by safety policy."
+}
