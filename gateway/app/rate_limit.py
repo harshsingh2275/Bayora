@@ -84,3 +84,24 @@ async def check_public_rate(request: Request) -> None:
     if not await bucket.consume():
         log.warning({"event": "public_rate_limited", "ip": ip})
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+
+# ── Heavy endpoint (per-IP) buckets ──────────────────────────────────────────
+_heavy_buckets: dict[str, TokenBucket] = {}
+
+def _get_heavy_bucket(ip: str) -> TokenBucket:
+    """Heavy rate limiter for compute-intensive endpoints (verify, tamper-demo)."""
+    from .config import RATE_LIMIT_PUBLIC_PER_MIN
+    if ip not in _heavy_buckets:
+        rate_per_sec = min(RATE_LIMIT_PUBLIC_PER_MIN / 60.0, 30.0 / 60.0)
+        _heavy_buckets[ip] = TokenBucket(rate=rate_per_sec, capacity=20.0)
+    return _heavy_buckets[ip]
+
+
+async def check_heavy_rate(request: Request) -> None:
+    """Raise 429 if the requesting IP is over the heavy endpoint rate limit."""
+    ip = request.client.host if request.client else "unknown"
+    bucket = _get_heavy_bucket(ip)
+    if not await bucket.consume():
+        log.warning({"event": "heavy_rate_limited", "ip": ip})
+        raise HTTPException(status_code=429, detail="Rate limit exceeded for heavy endpoint")

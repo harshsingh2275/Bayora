@@ -13,16 +13,18 @@ SECURITY notes:
   - /v1/* is never reachable through the web proxy (Caddy returns 404).
   - All structured logs go to stdout as JSON; no secrets or prompt text (SI-10).
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
-from .config import DEFAULT_CACHE_MODE
+from .config import DEFAULT_CACHE_MODE, LOGGER_URL, MODEL_URL, VERIFIER_URL
 from .database import get_setting, init_db, set_setting
 from .logger_client import RealLoggerClient, set_logger_client
-from .models import HealthResponse
+from .models import AggregatedHealthResponse, HealthResponse
 from .rate_limit import check_public_rate
 from .routes import admin, audit, probe, run_lifecycle, work
 
@@ -99,20 +101,64 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-# Public health endpoint (rate limited per architecture §5)
+# Public health endpoint (health aggregation across gateway, model, logger, verifier)
 @app.get(
     "/api/health",
-    response_model=HealthResponse,
+    response_model=AggregatedHealthResponse,
     dependencies=[Depends(check_public_rate)],
 )
-async def api_health() -> HealthResponse:
-    """SECURITY SI-10: No sensitive data in health response."""
-    return HealthResponse(status="ok")
+async def api_health() -> AggregatedHealthResponse:
+    """
+    Public aggregated health endpoint.
+    Checks gateway, model, logger, and verifier status.
+    SECURITY SI-10: No sensitive data in health response.
+    """
+    async def _check_service(url: str) -> str:
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    return "ok"
+                return f"error_{resp.status_code}"
+        except Exception:
+            return "unreachable"
+
+    # Gateway self-check: verify DB connection responsiveness
+    gw_status = "ok"
+    try:
+        if hasattr(app.state, "db") and app.state.db:
+            async with app.state.db.execute("SELECT 1") as cur:
+                await cur.fetchone()
+    except Exception:
+        gw_status = "error"
+
+    # Concurrently probe external services
+    model_status, logger_status, verifier_status = await asyncio.gather(
+        _check_service(f"{MODEL_URL}/health"),
+        _check_service(f"{LOGGER_URL}/health"),
+        _check_service(f"{VERIFIER_URL}/health"),
+    )
+
+    services = {
+        "gateway": gw_status,
+        "model": model_status,
+        "logger": logger_status,
+        "verifier": verifier_status,
+    }
+    all_ok = all(v == "ok" for v in services.values())
+    return AggregatedHealthResponse(
+        status="ok" if all_ok else "degraded",
+        services=services,
+    )
 
 
 # ── Catch-all for unmatched /v1/* paths ──────────────────────────────────────
 # Defence-in-depth: Caddy also blocks /v1/* at the edge (SI-11)
-@app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+@app.api_route(
+    "/v1/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    include_in_schema=False,
+)
 async def v1_catch_all(path: str) -> JSONResponse:
     """SECURITY SI-11: Any /v1/* path not matched by a router returns 404."""
     return JSONResponse(status_code=404, content={"detail": "Not found"})

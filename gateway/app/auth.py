@@ -56,11 +56,27 @@ def _verify_tenant_token(raw_token: str) -> Role:
     raise HTTPException(status_code=401, detail="Invalid or missing token")
 
 
+def _is_tenant_token(raw_token: str) -> bool:
+    """Return True if the token matches the red or blue tenant token hash."""
+    candidate_hash = _sha256_hex(raw_token)
+    if cfg.RED_TOKEN_SHA256 and _constant_compare(candidate_hash, cfg.RED_TOKEN_SHA256):
+        return True
+    if cfg.BLUE_TOKEN_SHA256 and _constant_compare(candidate_hash, cfg.BLUE_TOKEN_SHA256):
+        return True
+    return False
+
+
 def _verify_admin_token(raw_token: str) -> None:
-    """Hash and compare against admin hash.  Raises 401 if invalid."""
+    """Hash and compare against admin hash. Raises 401 if invalid, 403 if tenant token."""
     if not cfg.ADMIN_TOKEN_SHA256:
         log.error({"event": "auth_failed", "reason": "admin_hash_not_configured"})
         raise HTTPException(status_code=503, detail="Admin auth not configured")
+
+    # SECURITY §5 & probe A3: Tenant token on operator endpoint must return 403 (wrong role)
+    if _is_tenant_token(raw_token):
+        log.warning({"event": "authz_failed", "reason": "tenant_token_on_operator_endpoint"})
+        raise HTTPException(status_code=403, detail="Forbidden: Tenant tokens cannot access operator endpoints")
+
     candidate_hash = _sha256_hex(raw_token)
     # SECURITY SI-05: constant-time comparison
     if not _constant_compare(candidate_hash, cfg.ADMIN_TOKEN_SHA256):
@@ -105,7 +121,12 @@ async def require_blue(
 async def require_admin(
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> None:
-    """FastAPI dependency: authenticate operator X-Admin-Token header."""
+    """
+    FastAPI dependency: authenticate operator X-Admin-Token header.
+    SECURITY §5 & probe A3:
+      - 401 if missing credentials or bad admin token
+      - 403 if tenant token is used in X-Admin-Token
+    """
     if x_admin_token is None:
         log.warning({"event": "auth_failed", "reason": "missing_admin_token"})
         raise HTTPException(status_code=401, detail="X-Admin-Token header required")

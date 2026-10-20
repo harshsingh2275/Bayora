@@ -42,6 +42,7 @@ from ..models import (
     DoneResponse,
     RedAttackReport,
     RedReportResponse,
+    RunResultsResponse,
 )
 from ..rate_limit import check_public_rate, check_tenant_rate
 
@@ -803,6 +804,7 @@ async def blue_report(
 # ── Public Results (/api/runs/{run_id}/results) ──────────────────────────────
 @router.get(
     "/api/runs/{run_id}/results",
+    response_model=RunResultsResponse,
     dependencies=[Depends(check_public_rate)],
 )
 async def get_run_results(

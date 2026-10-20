@@ -16,15 +16,14 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from ..config import LOGGER_URL as DEFAULT_LOGGER_URL
+from ..config import VERIFIER_URL as DEFAULT_VERIFIER_URL
 from ..logger_client import _read_logger_token
-from ..rate_limit import check_public_rate
+from ..rate_limit import check_heavy_rate, check_public_rate
 
 log = logging.getLogger("gateway.routes.audit")
 
 router = APIRouter()
-
-DEFAULT_LOGGER_URL = os.environ.get("LOGGER_URL", "http://logger:8001").rstrip("/")
-DEFAULT_VERIFIER_URL = os.environ.get("VERIFIER_URL", "http://verifier:8002").rstrip("/")
 
 
 @router.get("/api/log", dependencies=[Depends(check_public_rate)])
@@ -52,7 +51,10 @@ async def get_audit_log(
         raise HTTPException(status_code=503, detail="Audit log service unavailable")
 
 
-@router.get("/api/verify", dependencies=[Depends(check_public_rate)])
+@router.get(
+    "/api/verify",
+    dependencies=[Depends(check_public_rate), Depends(check_heavy_rate)],
+)
 async def proxy_verify() -> dict[str, Any]:
     """Public proxy for verifier result."""
     try:
@@ -68,7 +70,10 @@ async def proxy_verify() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Verifier service unavailable")
 
 
-@router.get("/api/verify/tamper-demo", dependencies=[Depends(check_public_rate)])
+@router.get(
+    "/api/verify/tamper-demo",
+    dependencies=[Depends(check_public_rate), Depends(check_heavy_rate)],
+)
 async def proxy_tamper_demo() -> dict[str, Any]:
     """Public proxy for verifier in-memory tamper demo."""
     try:

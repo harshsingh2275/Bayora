@@ -20,7 +20,8 @@ sync-agents:
 	./scripts/sync-agents.sh
 
 lint:
-	@echo "lint: not implemented yet (T07)"
+	@$(PYTHON) -m py_compile $$(find gateway logger verifier red blue scripts tests -name '*.py')
+	@echo "lint: python syntax ok"
 
 test:
 	$(PYTEST) tests/unit tests/integration -v

@@ -21,17 +21,33 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from ..auth import require_admin
-from ..database import get_setting, set_setting
+from ..database import (
+    get_latest_breakit_report,
+    get_latest_timing_report,
+    get_setting,
+    save_breakit_report,
+    save_timing_report,
+    set_setting,
+)
 from ..deps import get_db, get_logger
 from ..logger_client import LoggerClient
 from ..models import (
     AbortRunResponse,
+    BreakitReportIngestResponse,
+    BreakitReportRequest,
+    BreakitReportResponse,
     CacheModeRequest,
     CacheModeResponse,
     CreateRunRequest,
     CreateRunResponse,
     OperatorRunItemResponse,
     RunDetailResponse,
+    RunListItem,
+    RunListResponse,
+    TimingReportIngestResponse,
+    TimingReportRequest,
+    TimingReportResponse,
+    TopologyResponse,
 )
 from ..rate_limit import check_public_rate
 from .run_lifecycle import get_run_with_timeout_check
@@ -210,21 +226,24 @@ async def get_run_item(
 # ── Public run viewer endpoints ────────────────────────────────────────────────
 @router.get(
     "/api/runs",
+    response_model=RunListResponse,
     dependencies=[Depends(check_public_rate)],
 )
 async def list_runs(
     db: aiosqlite.Connection = Depends(get_db),
     logger: LoggerClient = Depends(get_logger),
-) -> JSONResponse:
+) -> RunListResponse:
     """
-    Public: list of runs with state, commitment status, and timeline info.
+    Public: list of runs with state, commitment status, digests, and timeline info.
     SECURITY §5: Never exposes prompts or rules.
     """
     async with db.execute(
         "SELECT r.run_id, r.name, r.state, r.attack_count, r.seed, r.bundle_name, "
         "r.created_at, r.updated_at, "
         "MAX(CASE WHEN c.role = 'red' THEN 1 ELSE 0 END) as red_committed, "
-        "MAX(CASE WHEN c.role = 'blue' THEN 1 ELSE 0 END) as blue_committed "
+        "MAX(CASE WHEN c.role = 'blue' THEN 1 ELSE 0 END) as blue_committed, "
+        "MAX(CASE WHEN c.role = 'red' THEN c.set_digest ELSE NULL END) as set_digest, "
+        "MAX(CASE WHEN c.role = 'blue' THEN c.bundle_digest ELSE NULL END) as bundle_digest "
         "FROM runs r "
         "LEFT JOIN commitments c ON r.run_id = c.run_id "
         "GROUP BY r.run_id "
@@ -236,7 +255,7 @@ async def list_runs(
         r["red_committed"] = bool(r["red_committed"])
         r["blue_committed"] = bool(r["blue_committed"])
 
-    return JSONResponse(status_code=200, content={"runs": rows})
+    return RunListResponse(runs=[RunListItem(**r) for r in rows])
 
 
 @router.get(
@@ -283,12 +302,219 @@ async def get_run_detail(
     )
 
 
-# ── Report ingestion stubs ─────────────────────────────────────────────────────
-@router.post("/api/breakit/report")
-async def ingest_breakit(_auth: None = Depends(require_admin)) -> JSONResponse:
-    return JSONResponse(status_code=501, content={"detail": "Not implemented (T09)"})
+# ── Topology endpoint (/api/topology) ─────────────────────────────────────────
+TOPOLOGY_DATA = {
+    "services": [
+        {
+            "name": "web",
+            "image": "Caddy 2",
+            "networks": ["front-net"],
+            "purpose": "Public reverse proxy and frontend static files (SI-11)",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "gateway",
+            "image": "Python 3.12, FastAPI",
+            "networks": ["front-net", "red-net", "blue-net", "model-net", "log-net"],
+            "purpose": "Central coordinator, authorization, scoring, and proxy",
+            "tcb": True,
+            "isolated": False,
+        },
+        {
+            "name": "model",
+            "image": "llama.cpp server",
+            "networks": ["model-net"],
+            "purpose": "Client LLM under test (isolated on model-net)",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "logger",
+            "image": "Python 3.12, FastAPI",
+            "networks": ["log-net"],
+            "purpose": "Sole writer of the append-only signed audit log (SI-04)",
+            "tcb": True,
+            "isolated": True,
+        },
+        {
+            "name": "verifier",
+            "image": "Python 3.12, FastAPI",
+            "networks": ["log-net"],
+            "purpose": "Independent audit log verification service (read-only mount)",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "red",
+            "image": "Python 3.12",
+            "networks": ["red-net"],
+            "purpose": "Red-team adversarial testing agent",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "blue",
+            "image": "Python 3.12",
+            "networks": ["blue-net"],
+            "purpose": "Blue-team defensive bundle agent",
+            "tcb": False,
+            "isolated": True,
+        },
+    ],
+    "networks": [
+        {
+            "name": "front-net",
+            "internal": False,
+            "description": "Public-facing bridge carrying web and gateway only",
+            "services": ["web", "gateway"],
+        },
+        {
+            "name": "red-net",
+            "internal": True,
+            "description": "Internal network for red tenant and gateway (SI-03)",
+            "services": ["red", "gateway"],
+        },
+        {
+            "name": "blue-net",
+            "internal": True,
+            "description": "Internal network for blue tenant and gateway (SI-03)",
+            "services": ["blue", "gateway"],
+        },
+        {
+            "name": "model-net",
+            "internal": True,
+            "description": "Internal network for target LLM model server and gateway (SI-03)",
+            "services": ["model", "gateway"],
+        },
+        {
+            "name": "log-net",
+            "internal": True,
+            "description": "Internal network for audit logger, verifier, and gateway (SI-03)",
+            "services": ["logger", "verifier", "gateway"],
+        },
+    ],
+    "invariants": [
+        "No container is privileged; no host networking or devices (SI-01)",
+        "Non-root user, cap_drop ALL, no-new-privileges, read-only root with tmpfs (SI-02)",
+        "Tenant networks (red-net, blue-net, model-net, log-net) are internal: true (SI-03)",
+        "Gateway is the sole route to the model and logger (SI-04)",
+        "Public proxy exposes /api/* only; /v1/* blocked with 404 (SI-11)",
+    ],
+}
 
 
-@router.post("/api/experiments/timing/report")
-async def ingest_timing(_auth: None = Depends(require_admin)) -> JSONResponse:
-    return JSONResponse(status_code=501, content={"detail": "Not implemented (T08)"})
+@router.get(
+    "/api/topology",
+    response_model=TopologyResponse,
+    dependencies=[Depends(check_public_rate)],
+)
+async def get_topology() -> TopologyResponse:
+    """
+    Public: static description of networks, services, and security boundaries.
+    Used by frontend architecture diagram (architecture §5, §11).
+    """
+    return TopologyResponse(**TOPOLOGY_DATA)
+
+
+# ── Break-it reports ───────────────────────────────────────────────────────────
+@router.post(
+    "/api/breakit/report",
+    status_code=status.HTTP_201_CREATED,
+    response_model=BreakitReportIngestResponse,
+)
+async def ingest_breakit(
+    body: BreakitReportRequest,
+    _auth: None = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+    logger: LoggerClient = Depends(get_logger),
+) -> BreakitReportIngestResponse:
+    """
+    Operator: break-it harness posts its report.
+    Stored in DB and logged as breakit_reported audit event.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    report_dict = body.model_dump()
+    report_json = json.dumps(report_dict, sort_keys=True, separators=(",", ":"))
+    await save_breakit_report(db, report_json, now_iso)
+
+    # SECURITY SI-08: Log event with summary metadata only (no secrets)
+    await logger.append(
+        run_id=None,
+        actor="operator",
+        event="breakit_reported",
+        data={
+            "generated_at": body.generated_at or now_iso,
+            "git_commit": body.git_commit,
+            "summary": body.summary.model_dump(),
+        },
+    )
+    log.info({"event": "breakit_reported", "summary": body.summary.model_dump()})
+    return BreakitReportIngestResponse(status="ok", summary=body.summary)
+
+
+@router.get(
+    "/api/breakit/latest",
+    response_model=BreakitReportResponse,
+    dependencies=[Depends(check_public_rate)],
+)
+async def get_latest_breakit(
+    db: aiosqlite.Connection = Depends(get_db),
+) -> BreakitReportResponse:
+    """Public: latest break-it report."""
+    report_json = await get_latest_breakit_report(db)
+    if not report_json:
+        raise HTTPException(status_code=404, detail="No break-it report found")
+    data = json.loads(report_json)
+    return BreakitReportResponse(**data)
+
+
+# ── Timing experiment reports ─────────────────────────────────────────────────
+@router.post(
+    "/api/experiments/timing/report",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TimingReportIngestResponse,
+)
+async def ingest_timing(
+    body: TimingReportRequest,
+    _auth: None = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+    logger: LoggerClient = Depends(get_logger),
+) -> TimingReportIngestResponse:
+    """
+    Operator: timing side-channel experiment script posts its report.
+    Stored in DB and logged as timing_reported audit event.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    report_dict = body.model_dump()
+    report_json = json.dumps(report_dict, sort_keys=True, separators=(",", ":"))
+    await save_timing_report(db, report_json, now_iso)
+
+    # SECURITY SI-08: Log event with verdict and timestamp (no sensitive data)
+    await logger.append(
+        run_id=None,
+        actor="operator",
+        event="timing_reported",
+        data={
+            "generated_at": body.generated_at or now_iso,
+            "verdict": body.verdict if isinstance(body.verdict, dict) else {"verdict": body.verdict},
+        },
+    )
+    log.info({"event": "timing_reported"})
+    return TimingReportIngestResponse(status="ok", verdict=body.verdict)
+
+
+@router.get(
+    "/api/experiments/timing/latest",
+    response_model=TimingReportResponse,
+    dependencies=[Depends(check_public_rate)],
+)
+async def get_latest_timing(
+    db: aiosqlite.Connection = Depends(get_db),
+) -> TimingReportResponse:
+    """Public: latest timing experiment report."""
+    report_json = await get_latest_timing_report(db)
+    if not report_json:
+        raise HTTPException(status_code=404, detail="No timing experiment report found")
+    data = json.loads(report_json)
+    return TimingReportResponse(**data)

@@ -90,6 +90,20 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+-- breakit_reports: stores posted break-it runner reports
+CREATE TABLE IF NOT EXISTS breakit_reports (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_json  TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
+-- timing_reports: stores posted timing side-channel experiment reports
+CREATE TABLE IF NOT EXISTS timing_reports (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_json  TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
 -- Seed default settings if not present
 INSERT OR IGNORE INTO settings (key, value) VALUES ('cache_mode', 'isolated');
 """;
@@ -97,7 +111,15 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('cache_mode', 'isolated');
 
 async def init_db() -> aiosqlite.Connection:
     """Open/create the SQLite database and apply idempotent schema migrations."""
-    conn = await aiosqlite.connect(DB_PATH)
+    from . import config as cfg
+    import os
+
+    db_file = cfg.DB_PATH
+    dirname = os.path.dirname(db_file)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
+
+    conn = await aiosqlite.connect(db_file)
     conn.row_factory = aiosqlite.Row
     # SECURITY: WAL mode improves concurrency without shared write access from outside
     await conn.execute("PRAGMA journal_mode=WAL")
@@ -134,3 +156,39 @@ async def set_setting(conn: aiosqlite.Connection, key: str, value: str) -> None:
         (key, value),
     )
     await conn.commit()
+
+
+async def save_breakit_report(conn: aiosqlite.Connection, report_json: str, created_at: str) -> None:
+    """Persist a break-it probe report."""
+    await conn.execute(
+        "INSERT INTO breakit_reports (report_json, created_at) VALUES (?, ?)",
+        (report_json, created_at),
+    )
+    await conn.commit()
+
+
+async def get_latest_breakit_report(conn: aiosqlite.Connection) -> str | None:
+    """Fetch the most recent break-it report JSON string."""
+    async with conn.execute(
+        "SELECT report_json FROM breakit_reports ORDER BY id DESC LIMIT 1"
+    ) as cur:
+        row = await cur.fetchone()
+        return row["report_json"] if row else None
+
+
+async def save_timing_report(conn: aiosqlite.Connection, report_json: str, created_at: str) -> None:
+    """Persist a timing side-channel experiment report."""
+    await conn.execute(
+        "INSERT INTO timing_reports (report_json, created_at) VALUES (?, ?)",
+        (report_json, created_at),
+    )
+    await conn.commit()
+
+
+async def get_latest_timing_report(conn: aiosqlite.Connection) -> str | None:
+    """Fetch the most recent timing side-channel experiment report JSON string."""
+    async with conn.execute(
+        "SELECT report_json FROM timing_reports ORDER BY id DESC LIMIT 1"
+    ) as cur:
+        row = await cur.fetchone()
+        return row["report_json"] if row else None

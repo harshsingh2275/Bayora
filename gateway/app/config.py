@@ -33,6 +33,9 @@ MODEL_URL: str = os.getenv("MODEL_URL", "http://model:8080")
 # ── Logger service ──────────────────────────────────────────────────────────
 LOGGER_URL: str = os.getenv("LOGGER_URL", "http://logger:8001")
 
+# ── Verifier service ────────────────────────────────────────────────────────
+VERIFIER_URL: str = os.getenv("VERIFIER_URL", "http://verifier:8002")
+
 # ── SQLite database path (inside gateway-data named volume) ─────────────────
 DB_PATH: str = os.getenv("DB_PATH", "/app/data/gateway.db")
 

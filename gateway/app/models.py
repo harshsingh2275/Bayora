@@ -235,3 +235,118 @@ class CacheModeResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str = "gateway"
+
+
+class AggregatedHealthResponse(BaseModel):
+    status: str
+    services: dict[str, str]
+
+
+# ── Run list (/api/runs GET) ──────────────────────────────────────────────────
+
+class RunListItem(BaseModel):
+    run_id: str
+    name: str
+    state: str
+    attack_count: int
+    seed: int
+    bundle_name: str
+    created_at: str
+    updated_at: str
+    red_committed: bool = False
+    blue_committed: bool = False
+    set_digest: str | None = None
+    bundle_digest: str | None = None
+
+
+class RunListResponse(BaseModel):
+    runs: list[RunListItem]
+
+
+# ── Topology (/api/topology GET) ──────────────────────────────────────────────
+
+class TopologyService(BaseModel):
+    name: str
+    image: str
+    networks: list[str]
+    purpose: str
+    tcb: bool
+    isolated: bool
+
+
+class TopologyNetwork(BaseModel):
+    name: str
+    internal: bool
+    description: str
+    services: list[str]
+
+
+class TopologyResponse(BaseModel):
+    services: list[TopologyService]
+    networks: list[TopologyNetwork]
+    invariants: list[str]
+
+
+# ── Break-it reports (/api/breakit/*) ─────────────────────────────────────────
+
+class BreakitProbe(StrictBase):
+    id: str = Field(..., max_length=16)
+    category: str = Field(..., max_length=32)
+    description: str = Field(..., max_length=256)
+    expected: str = Field(..., max_length=256)
+    observed: str = Field(..., max_length=256)
+    passed: bool
+
+
+class BreakitSummary(StrictBase):
+    total: int = Field(default=0, ge=0)
+    passed: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+
+
+class BreakitReportRequest(StrictBase):
+    generated_at: str = ""
+    git_commit: str = ""
+    probes: list[BreakitProbe] = Field(default_factory=list)
+    summary: BreakitSummary = Field(default_factory=BreakitSummary)
+
+
+class BreakitReportIngestResponse(BaseModel):
+    status: str = "ok"
+    summary: BreakitSummary
+
+
+class BreakitReportResponse(BaseModel):
+    generated_at: str
+    git_commit: str
+    probes: list[BreakitProbe]
+    summary: BreakitSummary
+
+
+# ── Timing experiment reports (/api/experiments/timing/*) ─────────────────────
+
+class TimingReportRequest(StrictBase):
+    generated_at: str = ""
+    git_commit: str = ""
+    environment: dict[str, Any] = Field(default_factory=dict)
+    modes: dict[str, Any] = Field(default_factory=dict)
+    verdict: dict[str, Any] | str = Field(default_factory=dict)
+    raw_samples: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class TimingReportIngestResponse(BaseModel):
+    status: str = "ok"
+    verdict: dict[str, Any] | str = Field(default_factory=dict)
+
+
+class TimingReportResponse(BaseModel):
+    generated_at: str = ""
+    git_commit: str = ""
+    environment: dict[str, Any] = Field(default_factory=dict)
+    modes: dict[str, Any] = Field(default_factory=dict)
+    verdict: dict[str, Any] | str = Field(default_factory=dict)
+    raw_samples: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
