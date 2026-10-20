@@ -1,0 +1,126 @@
+/* Design tokens for Bayora dashboard (docs/design.md & docs/FRONTEND_UI_UX_RULES.md) */
+:root {
+  /* Fonts */
+  --font-family-display: "Instrument Serif", Georgia, serif;
+  --font-family-primary: "Public Sans", system-ui, sans-serif;
+  --font-family-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* Typography Scale */
+  --font-size-xs: 12.75px;
+  --font-size-sm: 17px;
+  --font-size-md: 19.13px;
+  --font-size-lg: 21.25px;
+  --font-size-xl: 25.5px;
+  --font-size-2xl: 64.79px;
+  --font-size-mono: 14.45px;
+  --font-size-display: clamp(38px, 5.5vw + 8px, 64.79px);
+
+  --font-weight-base: 400;
+  --font-weight-strong: 600;
+
+  --font-line-height-body: 25.5px;
+  --font-line-height-caption: 17.85px;
+  --font-line-height-heading: 1.1;
+  --font-line-height-title: 1.2;
+
+  /* Spacing Scale */
+  --space-1: 4.25px;
+  --space-2: 8.5px;
+  --space-3: 12.75px;
+  --space-4: 17px;
+  --space-5: 23.8px;
+  --space-6: 33.46px;
+  --space-7: 34px;
+  --space-8: 54.56px;
+  --space-9: 108px;
+
+  /* Geometry & Rules (Strict SI & Design Rules: Radius 0px) */
+  --radius-none: 0px;
+  --layout-max-width: 1200px;
+  --layout-reading-width: 720px;
+  --size-control-height: 44px;
+  --size-touch-min: 44px;
+  --size-target-min: 24px;
+  --size-focus-width: 2px;
+  --size-focus-offset: 2px;
+
+  /* Motion */
+  --motion-duration-instant: 200ms;
+  --motion-duration-short: 300ms;
+  --motion-duration-step: 120ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-instant: 0ms;
+    --motion-duration-short: 0ms;
+    --motion-duration-step: 0ms;
+  }
+}
+
+/* Light Theme (Default Warm Neutral) */
+[data-theme="light"], :root:not([data-theme="dark"]) {
+  --color-surface-base: #F6F5F1;
+  --color-surface-panel: #FBFAF7;
+  --color-surface-sunken: #ECEAE3;
+  --color-surface-inverse: #20221F;
+  --color-text-primary: #20221F;
+  --color-text-secondary: #62645F;
+  --color-text-on-inverse: #F6F5F1;
+  --color-text-secondary-on-inverse: #B9B7AE;
+  --color-accent-primary: #4C5C44;
+  --color-accent-on-inverse: #A9C39B;
+  --color-border-divider: #D8D7D0;
+  --color-border-control: #7D7B73;
+  --color-border-on-inverse: #8D8B83;
+
+  --color-status-pass-text: #3A4E32;
+  --color-status-pass-bg: #E4EBDD;
+  --color-status-fail-text: #8F1D2C;
+  --color-status-fail-bg: #F3DCDC;
+  --color-status-warn-text: #7A4B00;
+  --color-status-warn-bg: #F4E3BD;
+  --color-status-info-text: #20221F;
+  --color-status-info-bg: #E6E4DC;
+
+  --color-action-danger-bg: #8F1D2C;
+  --color-action-danger-text: #F6F5F1;
+  --color-focus: #20221F;
+  --color-scrim: rgba(32, 34, 31, 0.6);
+  --color-chart-hit: #4C5C44;
+  --color-chart-miss: #62645F;
+}
+
+/* Dark Theme (First-Class Slate-Neutral) */
+[data-theme="dark"] {
+  --color-surface-base: #20221F;
+  --color-surface-panel: #262925;
+  --color-surface-sunken: #1A1C19;
+  --color-surface-inverse: #F6F5F1;
+  --color-text-primary: #F6F5F1;
+  --color-text-secondary: #B9B7AE;
+  --color-text-on-inverse: #20221F;
+  --color-text-secondary-on-inverse: #62645F;
+  --color-accent-primary: #A9C39B;
+  --color-accent-on-inverse: #4C5C44;
+  --color-border-divider: #3E423B;
+  --color-border-control: #62665E;
+  --color-border-on-inverse: #7D7B73;
+
+  --color-status-pass-text: #A9C39B;
+  --color-status-pass-bg: #2B3827;
+  --color-status-fail-text: #F0A5A5;
+  --color-status-fail-bg: #3F1D22;
+  --color-status-warn-text: #E8C46A;
+  --color-status-warn-bg: #3D2E14;
+  --color-status-info-text: #ECEAE3;
+  --color-status-info-bg: #2D312B;
+
+  --color-action-danger-bg: #A32837;
+  --color-action-danger-text: #F6F5F1;
+  --color-focus: #F6F5F1;
+  --color-scrim: rgba(10, 11, 10, 0.75);
+  --color-chart-hit: #A9C39B;
+  --color-chart-miss: #B9B7AE;
+}

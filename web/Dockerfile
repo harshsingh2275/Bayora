@@ -1,3 +1,12 @@
+# Stage 1: Ephemeral Node build environment
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Stage 2: Hardened Caddy runtime (preserving all existing hardening settings)
 # SECURITY: Pinned base Caddy version 2.9-alpine
 FROM caddy:2.9-alpine
 
@@ -9,7 +18,7 @@ RUN apk add --no-cache python3 libcap && \
     adduser -u 10001 -S appuser -G appgroup
 
 COPY Caddyfile /etc/caddy/Caddyfile
-COPY index.html /srv/index.html
+COPY --from=build --chown=10001:10001 /app/dist /srv
 
 # SECURITY: Ensure unprivileged user owns configuration, data, and server root
 RUN mkdir -p /data /config && chown -R 10001:10001 /etc/caddy /srv /data /config
