@@ -329,8 +329,10 @@ class TimingReportRequest(StrictBase):
     generated_at: str = ""
     git_commit: str = ""
     environment: dict[str, Any] = Field(default_factory=dict)
+    protocol: dict[str, Any] = Field(default_factory=dict)
     modes: dict[str, Any] = Field(default_factory=dict)
     verdict: dict[str, Any] | str = Field(default_factory=dict)
+    verdict_rule: str = ""
     raw_samples: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
@@ -345,8 +347,10 @@ class TimingReportResponse(BaseModel):
     generated_at: str = ""
     git_commit: str = ""
     environment: dict[str, Any] = Field(default_factory=dict)
+    protocol: dict[str, Any] = Field(default_factory=dict)
     modes: dict[str, Any] = Field(default_factory=dict)
     verdict: dict[str, Any] | str = Field(default_factory=dict)
+    verdict_rule: str = ""
     raw_samples: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)

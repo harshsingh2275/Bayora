@@ -84,7 +84,8 @@ def _build_request_body(
         body["cache_prompt"] = True     # enable cache within the pinned slot
         log.debug({"event": "model_request_slot", "role": role, "slot": slot, "mode": "isolated"})
     else:
-        # shared mode: no slot pinning; server picks by prefix similarity (deliberate weak mode)
+        # shared mode: no slot pinning; prompt caching on (architecture §9)
+        body["cache_prompt"] = True
         log.debug({"event": "model_request_slot", "role": role, "mode": "shared"})
 
     return body

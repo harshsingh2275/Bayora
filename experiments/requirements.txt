@@ -1,0 +1,4 @@
+# Experiments dependencies
+# SECURITY: AGENTS.md §4: scipy only inside experiments/
+scipy==1.18.1
+numpy==2.5.4

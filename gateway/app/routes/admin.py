@@ -57,6 +57,8 @@ log = logging.getLogger("gateway.routes.admin")
 router = APIRouter()
 
 
+from ..model_client import erase_slot
+
 # ── Cache-mode control ────────────────────────────────────────────────────────
 @router.get(
     "/api/cache-mode",
@@ -78,6 +80,9 @@ async def set_cache_mode(
 ) -> CacheModeResponse:
     """Operator: set cache mode (isolated | shared)."""
     await set_setting(db, "cache_mode", body.mode)
+    # Erase slots upon mode switch so cache states are reset cleanly (architecture §9)
+    await erase_slot(0)
+    await erase_slot(1)
     # SECURITY SI-07/SI-08: Log cache_mode_changed event to audit chain
     await logger.append(
         run_id=None,
