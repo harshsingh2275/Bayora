@@ -27,8 +27,10 @@ BLUE_TOKEN_SHA256: str  = _read_secret("blue_token_sha256")
 ADMIN_TOKEN_SHA256: str = _read_secret("admin_token_sha256")
 LOGGER_TOKEN: str       = _read_secret("logger_token")
 
-# ── Model service ───────────────────────────────────────────────────────────
-MODEL_URL: str = os.getenv("MODEL_URL", "http://model:8080")
+# ── Model services (§9 fallback: separate instances per tenant) ─────────────
+MODEL_RED_URL: str  = os.getenv("MODEL_RED_URL", "http://model-red:8080")
+MODEL_BLUE_URL: str = os.getenv("MODEL_BLUE_URL", "http://model-blue:8080")
+MODEL_URL: str      = os.getenv("MODEL_URL", MODEL_RED_URL)
 
 # ── Logger service ──────────────────────────────────────────────────────────
 LOGGER_URL: str = os.getenv("LOGGER_URL", "http://logger:8001")

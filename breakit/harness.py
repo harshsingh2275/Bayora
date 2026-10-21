@@ -36,7 +36,8 @@ SECRETS_DIR = os.path.join(REPO_ROOT, "secrets")
 ALL_CONTAINERS = [
     "bayora-web",
     "bayora-gateway",
-    "bayora-model",
+    "bayora-model-red",
+    "bayora-model-blue",
     "bayora-logger",
     "bayora-verifier",
     "bayora-red",
@@ -135,7 +136,8 @@ def collect_target_ips_for_n2() -> tuple[list[tuple[str, int]], list[tuple[str, 
             pass
         return {}
 
-    model_ips = get_container_network_ips("bayora-model")
+    model_red_ips = get_container_network_ips("bayora-model-red")
+    model_blue_ips = get_container_network_ips("bayora-model-blue")
     logger_ips = get_container_network_ips("bayora-logger")
     verifier_ips = get_container_network_ips("bayora-verifier")
     red_ips = get_container_network_ips("bayora-red")
@@ -143,8 +145,10 @@ def collect_target_ips_for_n2() -> tuple[list[tuple[str, int]], list[tuple[str, 
     gateway_ips = get_container_network_ips("bayora-gateway")
     web_ips = get_container_network_ips("bayora-web")
 
+    all_model_ips = list(model_red_ips.values()) + list(model_blue_ips.values())
+
     # Forbidden destinations for red:
-    for ip in model_ips.values():
+    for ip in all_model_ips:
         red_targets.append((ip, 8080))
     for ip in logger_ips.values():
         red_targets.append((ip, 8001))
@@ -161,7 +165,7 @@ def collect_target_ips_for_n2() -> tuple[list[tuple[str, int]], list[tuple[str, 
             red_targets.append((ip, 8001))
 
     # Forbidden destinations for blue:
-    for ip in model_ips.values():
+    for ip in all_model_ips:
         blue_targets.append((ip, 8080))
     for ip in logger_ips.values():
         blue_targets.append((ip, 8001))
@@ -427,7 +431,10 @@ def execute_authz_probes(gateway_url: str, web_url: str) -> list[dict[str, Any]]
     # We pause red and blue agents briefly to avoid background polling races,
     # create a run, test sealed report and results, test prompt digest tampering (409),
     # abort the test run, and unpause red & blue.
-    subprocess.run(["docker", "compose", "pause", "red", "blue"], cwd=REPO_ROOT, capture_output=True, check=False)
+    try:
+        subprocess.run(["docker", "compose", "pause", "red", "blue"], cwd=REPO_ROOT, capture_output=True, check=False, timeout=5.0)
+    except Exception:
+        pass
     test_run_id = None
     a4_status, a5_status, a6_status = 0, 0, 0
     runs_view_ok = False
@@ -496,9 +503,12 @@ def execute_authz_probes(gateway_url: str, web_url: str) -> list[dict[str, Any]]
                 method="POST",
                 headers={"X-Admin-Token": admin_token},
             )
-        subprocess.run(
-            ["docker", "compose", "unpause", "red", "blue"], cwd=REPO_ROOT, capture_output=True, check=False
-        )
+        try:
+            subprocess.run(
+                ["docker", "compose", "unpause", "red", "blue"], cwd=REPO_ROOT, capture_output=True, check=False, timeout=5.0
+            )
+        except Exception:
+            pass
 
     # Fallback checks if creating an active run was blocked by an existing run
     if a4_status == 0:
@@ -755,7 +765,8 @@ def execute_config_probes() -> list[dict[str, Any]]:
     custom_services = [
         "bayora-web",
         "bayora-gateway",
-        "bayora-model",
+        "bayora-model-red",
+        "bayora-model-blue",
         "bayora-logger",
         "bayora-verifier",
         "bayora-red",
@@ -805,9 +816,9 @@ def execute_config_probes() -> list[dict[str, Any]]:
         }
     )
 
-    # ── C3: Networks red-net, blue-net, model-net, log-net internal; expected service attachments
+    # ── C3: Networks red-net, blue-net, model-red-net, model-blue-net, log-net internal; expected service attachments
     c3_issues: list[str] = []
-    expected_internal = ["red-net", "blue-net", "model-net", "log-net"]
+    expected_internal = ["red-net", "blue-net", "model-red-net", "model-blue-net", "log-net"]
     for net_suffix in expected_internal:
         try:
             res = subprocess.run(
@@ -832,10 +843,12 @@ def execute_config_probes() -> list[dict[str, Any]]:
             "bayora_front-net",
             "bayora_red-net",
             "bayora_blue-net",
-            "bayora_model-net",
+            "bayora_model-red-net",
+            "bayora_model-blue-net",
             "bayora_log-net",
         },
-        "bayora-model": {"bayora_model-net"},
+        "bayora-model-red": {"bayora_model-red-net"},
+        "bayora-model-blue": {"bayora_model-blue-net"},
         "bayora-logger": {"bayora_log-net"},
         "bayora-verifier": {"bayora_log-net"},
         "bayora-red": {"bayora_red-net"},
@@ -853,10 +866,10 @@ def execute_config_probes() -> list[dict[str, Any]]:
         {
             "id": "C3",
             "category": "Config",
-            "description": "Networks red-net, blue-net, model-net, log-net internal; each service attached to exactly the expected networks",
+            "description": "Networks red-net, blue-net, model-red-net, model-blue-net, log-net internal; each service attached to exactly the expected networks",
             "expected": "Pass",
             "observed": (
-                "All 4 internal networks verified; exact service attachments verified"
+                "All 5 internal networks verified; exact service attachments verified"
                 if c3_ok
                 else "; ".join(c3_issues)
             ),
@@ -936,7 +949,8 @@ def execute_config_probes() -> list[dict[str, Any]]:
         "bayora-logger": {"log_signing_key", "logger_token"},
         "bayora-verifier": {"trusted_pubkey.pem"},
         "bayora-web": set(),
-        "bayora-model": set(),
+        "bayora-model-red": set(),
+        "bayora-model-blue": set(),
     }
 
     for cname, exp_secs in expected_secrets.items():

@@ -2,7 +2,7 @@
 # SECURITY: Baseline hardening rules (SI-01..SI-04, architecture §2, §3, §4)
 # - No container is privileged, no host networking/PID/devices, no docker.sock mounts
 # - Custom containers: user 10001:10001, cap_drop ALL, no-new-privileges, read_only rootfs with tmpfs /tmp
-# - Internal networks (red-net, blue-net, model-net, log-net) have internal: true (no internet, no host routing)
+# - Internal networks (red-net, blue-net, model-red-net, model-blue-net, log-net) have internal: true (no internet, no host routing)
 # - Only gateway bridges multiple networks; only web publishes ports to host
 
 services:
@@ -70,6 +70,8 @@ services:
       - SERVICE_PORT=8000
       - PYTHONDONTWRITEBYTECODE=1
       - DEFAULT_CACHE_MODE=${DEFAULT_CACHE_MODE:-isolated}
+      - MODEL_RED_URL=http://model-red:8080
+      - MODEL_BLUE_URL=http://model-blue:8080
       - MAX_ATTACKS=${MAX_ATTACKS:-100}
       - ATTACK_MAX_TOKENS=${ATTACK_MAX_TOKENS:-96}
       - RUN_TIMEOUT_SECONDS=${RUN_TIMEOUT_SECONDS:-600}
@@ -86,7 +88,8 @@ services:
       - front-net
       - red-net
       - blue-net
-      - model-net
+      - model-red-net
+      - model-blue-net
       - log-net
     cpus: 1.0
     mem_limit: 512m
@@ -100,15 +103,15 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # Model Service (Local LLM Server - llama.cpp)
+  # Model Service - Red Tenant (Local LLM Server - llama.cpp)
   # ============================================================================
-  # SECURITY (Architecture §3): Tested and verified running with unprivileged
+  # SECURITY (Architecture §3, §9 fallback): Tested and verified running with unprivileged
   # user 10001:10001, cap_drop ALL, no-new-privileges, and read-only rootfs.
   # tmpfs /tmp is mounted rw (noexec, nosuid) for temporary files and slot management.
-  # Attached strictly to internal model-net only (SI-03).
-  model:
+  # Attached strictly to internal model-red-net only (SI-03).
+  model-red:
     image: ghcr.io/ggml-org/llama.cpp:server-b11382
-    container_name: bayora-model
+    container_name: bayora-model-red
     user: "10001:10001"
     read_only: true
     cap_drop:
@@ -141,8 +144,63 @@ services:
       # SECURITY: Model weights mounted strictly read-only
       - ./data/models:/data/models:ro
     networks:
-      # SECURITY: Isolated internal network; only gateway bridges to model-net
-      - model-net
+      # SECURITY: Isolated internal network; only gateway bridges to model-red-net
+      - model-red-net
+    cpus: ${MODEL_CPUS:-2.0}
+    mem_limit: ${MODEL_MEM_LIMIT:-2g}
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Model Service - Blue Tenant (Local LLM Server - llama.cpp)
+  # ============================================================================
+  # SECURITY (Architecture §3, §9 fallback): Tested and verified running with unprivileged
+  # user 10001:10001, cap_drop ALL, no-new-privileges, and read-only rootfs.
+  # tmpfs /tmp is mounted rw (noexec, nosuid) for temporary files and slot management.
+  # Attached strictly to internal model-blue-net only (SI-03).
+  model-blue:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11382
+    container_name: bayora-model-blue
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      - MODEL_FILE=${MODEL_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}
+      - MODEL_THREADS=${MODEL_THREADS:-2}
+      - MODEL_CTX=${MODEL_CTX:-8192}
+      - MODEL_PARALLEL=${MODEL_PARALLEL:-2}
+    command:
+      - -m
+      - /data/models/${MODEL_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - -c
+      - "${MODEL_CTX:-8192}"
+      - --parallel
+      - "${MODEL_PARALLEL:-2}"
+      - -t
+      - "${MODEL_THREADS:-2}"
+      - --slot-save-path
+      - /tmp
+    volumes:
+      # SECURITY: Model weights mounted strictly read-only
+      - ./data/models:/data/models:ro
+    networks:
+      # SECURITY: Isolated internal network; only gateway bridges to model-blue-net
+      - model-blue-net
     cpus: ${MODEL_CPUS:-2.0}
     mem_limit: ${MODEL_MEM_LIMIT:-2g}
     pids_limit: 100
@@ -321,7 +379,10 @@ networks:
   blue-net:
     driver: bridge
     internal: true
-  model-net:
+  model-red-net:
+    driver: bridge
+    internal: true
+  model-blue-net:
     driver: bridge
     internal: true
   log-net:

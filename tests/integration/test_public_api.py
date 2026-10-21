@@ -181,7 +181,7 @@ async def test_api_topology(client: AsyncClient):
 
     # Check services
     services = {s["name"]: s for s in data["services"]}
-    for name in ("web", "gateway", "model", "logger", "verifier", "red", "blue"):
+    for name in ("web", "gateway", "model", "model-red", "model-blue", "logger", "verifier", "red", "blue"):
         assert name in services
         assert "image" in services[name]
         assert "networks" in services[name]
@@ -192,12 +192,14 @@ async def test_api_topology(client: AsyncClient):
     assert services["gateway"]["tcb"] is True
     assert services["logger"]["tcb"] is True
     assert services["model"]["tcb"] is False
+    assert services["model-red"]["tcb"] is False
+    assert services["model-blue"]["tcb"] is False
     assert services["red"]["tcb"] is False
     assert services["blue"]["tcb"] is False
 
     # Check networks
     networks = {n["name"]: n for n in data["networks"]}
-    for net in ("front-net", "red-net", "blue-net", "model-net", "log-net"):
+    for net in ("front-net", "red-net", "blue-net", "model-red-net", "model-blue-net", "log-net"):
         assert net in networks
         if net == "front-net":
             assert networks[net]["internal"] is False

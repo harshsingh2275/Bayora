@@ -21,7 +21,7 @@ import httpx
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
-from .config import DEFAULT_CACHE_MODE, LOGGER_URL, MODEL_URL, VERIFIER_URL
+from .config import DEFAULT_CACHE_MODE, LOGGER_URL, MODEL_BLUE_URL, MODEL_RED_URL, MODEL_URL, VERIFIER_URL
 from .database import get_setting, init_db, set_setting
 from .logger_client import RealLoggerClient, set_logger_client
 from .models import AggregatedHealthResponse, HealthResponse
@@ -132,20 +132,25 @@ async def api_health() -> AggregatedHealthResponse:
     except Exception:
         gw_status = "error"
 
-    # Concurrently probe external services
-    model_status, logger_status, verifier_status = await asyncio.gather(
-        _check_service(f"{MODEL_URL}/health"),
+    # Concurrently probe external services (§9 fallback: dual model instances)
+    model_red_status, model_blue_status, logger_status, verifier_status = await asyncio.gather(
+        _check_service(f"{MODEL_RED_URL}/health"),
+        _check_service(f"{MODEL_BLUE_URL}/health"),
         _check_service(f"{LOGGER_URL}/health"),
         _check_service(f"{VERIFIER_URL}/health"),
     )
 
+    model_ok = (model_red_status == "ok" and model_blue_status == "ok")
+
     services = {
         "gateway": gw_status,
-        "model": model_status,
+        "model": "ok" if model_ok else "degraded",
+        "model_red": model_red_status,
+        "model_blue": model_blue_status,
         "logger": logger_status,
         "verifier": verifier_status,
     }
-    all_ok = all(v == "ok" for v in services.values())
+    all_ok = all(v == "ok" for v in (gw_status, model_red_status, model_blue_status, logger_status, verifier_status))
     return AggregatedHealthResponse(
         status="ok" if all_ok else "degraded",
         services=services,

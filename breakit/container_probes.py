@@ -18,7 +18,7 @@ import sys
 def probe_n1(role: str) -> dict:
     """N1: Resolve forbidden hostnames (must fail)."""
     desc = f"From {role}: resolve other services (DNS)"
-    forbidden = ["model", "logger", "verifier"]
+    forbidden = ["model", "model-red", "model-blue", "logger", "verifier"]
     if role == "red":
         forbidden.append("blue")
     else:

@@ -287,7 +287,7 @@ export const ArchitectureDiagram: React.FC<ArchitectureDiagramProps> = ({
               strokeWidth="1"
             />
             <text x="575" y="65" fill="var(--color-text-secondary)" fontSize="11" fontWeight="600">
-              model-net (Internal)
+              model-nets (Internal)
             </text>
 
             <rect
@@ -502,13 +502,13 @@ export const ArchitectureDiagram: React.FC<ArchitectureDiagramProps> = ({
                 strokeWidth={selectedNode?.name === "model" ? "2.5" : "1.5"}
               />
               <text x="600" y="120" fill="var(--color-text-primary)" fontSize="13" fontWeight="600" fontFamily="var(--font-family-mono)">
-                model (LLM)
+                model (LLM Cluster)
               </text>
               <text x="600" y="140" fill="var(--color-text-secondary)" fontSize="10">
-                llama.cpp server
+                model-red & model-blue
               </text>
               <text x="600" y="152" fill="var(--color-text-secondary)" fontSize="9">
-                Slot-pinned cache
+                Tenant routed instances
               </text>
             </g>
 

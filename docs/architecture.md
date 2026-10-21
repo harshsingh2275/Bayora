@@ -26,14 +26,15 @@ The design rests on five ideas:
 | Service | Image / tech | Networks | Purpose |
 |---|---|---|---|
 | `web` | Caddy 2 serving the built frontend (Vite + React + TypeScript) | `front-net` | Public site. Reverse-proxies **only** `/api/*` to the gateway. Returns 404 for everything else under non-static paths, including `/v1/*`. |
-| `gateway` | Python 3.12, FastAPI | `front-net`, `red-net`, `blue-net`, `model-net`, `log-net` | Auth, request whitelist, defense application, model forwarding, run lifecycle, results, public API. The only multi-homed service. |
-| `model` | llama.cpp `llama-server` with a small GGUF model | `model-net` | Client LLM. CPU only. |
+| `gateway` | Python 3.12, FastAPI | `front-net`, `red-net`, `blue-net`, `model-red-net`, `model-blue-net`, `log-net` | Auth, request whitelist, defense application, model forwarding, run lifecycle, results, public API. The only multi-homed service. |
+| `model-red` | llama.cpp `llama-server` with a small GGUF model | `model-red-net` | Client LLM instance for red tenant. CPU only. |
+| `model-blue` | llama.cpp `llama-server` with a small GGUF model | `model-blue-net` | Client LLM instance for blue tenant. CPU only. |
 | `logger` | Python 3.12, FastAPI | `log-net` | Sole writer of the audit log. Hash chain plus signed checkpoints. |
 | `verifier` | Python 3.12, FastAPI | `log-net` | Independent log verification. Read-only log mount. Own code path (does not import logger code). |
 | `red` | Python 3.12 | `red-net` | Red-team agent. Reads its private attack pool. |
 | `blue` | Python 3.12 | `blue-net` | Blue-team agent. Reads its private defense bundles. |
 
-Networks: `red-net`, `blue-net`, `model-net`, `log-net` are all `internal: true` (no internet, no host access). `front-net` is the only non-internal network and carries only `web` and `gateway`.
+Networks: `red-net`, `blue-net`, `model-red-net`, `model-blue-net`, `log-net` are all `internal: true` (no internet, no host access). `front-net` is the only non-internal network and carries only `web` and `gateway`.
 
 ```
                          Internet / judges
@@ -41,9 +42,9 @@ Networks: `red-net`, `blue-net`, `model-net`, `log-net` are all `internal: true`
                           [ web (Caddy) ]  --- /api/* only ---+
                                |  front-net                    |
                          +-----+------------------------------v----+
- red-net   [ red ] ------|                                          |
- blue-net  [ blue ] -----|             gateway (TCB)                |---- model-net --- [ model ]
-                         |                                          |
+ red-net   [ red ] ------|                                          |---- model-red-net --- [ model-red ]
+ blue-net  [ blue ] -----|             gateway (TCB)                |
+                         |                                          |---- model-blue-net -- [ model-blue ]
                          +----------------+-------------------------+
                                           | log-net
                                   [ logger ]   [ verifier ]
@@ -90,7 +91,7 @@ Host files must be mode `0644` inside a `0700` `secrets/` directory, because com
 
 | Volume / bind mount | rw/ro | Service |
 |---|---|---|
-| `./data/models` | ro | `model` |
+| `./data/models` | ro | `model-red`, `model-blue` |
 | `./data/red` (attack pool) | ro | `red` |
 | `./data/blue` (defense bundles) | ro | `blue` |
 | `gateway-data` (SQLite) | rw | `gateway` only |
@@ -221,14 +222,14 @@ Model request built by the gateway: fixed system prompt ("You are a helpful assi
 
 **Why:** llama.cpp's server reuses the KV cache of a slot when a new prompt shares a prefix with it. If two tenants share slots, one tenant's prompt can be inferred from faster responses. This is the LLM-specific side channel.
 
-**Model server:** one `llama-server` with `--parallel 2` (context size set so each slot has enough room for roughly 2k tokens, for example `-c 8192`). All flag and parameter names **must be verified against the installed version** (`llama-server --help`, its README) before use. See §15.
+**Model server (§9 fallback active):** two dedicated instances (`model-red` on `model-red-net`, `model-blue` on `model-blue-net`), each running `llama-server`. All flag and parameter names **must be verified against the installed version** (`llama-server --help`, its README) before use. See §15.
 
 | Mode | Gateway behavior |
 |---|---|
-| `shared` (deliberately weak) | No slot pinning, prompt caching on. The server picks any slot by prefix similarity. |
-| `isolated` (default) | Red requests pinned to slot 0 and blue requests to slot 1 via the slot parameter. Client-supplied slot or cache parameters are never forwarded. A tenant's slot is erased when a run concludes (if the server supports slot erase). |
+| `shared` (deliberately weak) | Both tenants routed to the same model instance (`model-red`), enabling cross-tenant prompt KV-cache reuse. |
+| `isolated` (default) | Red requests routed to `model-red` and blue requests routed to `model-blue` across physically partitioned internal networks (`model-red-net` and `model-blue-net`). Client-supplied slot or cache parameters are never forwarded. A tenant's slot is erased on conclusion. |
 
-Fallback if per-slot pinning is unreliable in the installed version: run one model server per tenant and route by tenant (more memory, simpler guarantee).
+Fallback per §9: running one model server per tenant and routing by tenant provides a physical network and container barrier against cross-tenant cache reuse.
 
 **Experiment (`experiments/timing/run.py`, runs on the host with both tenant tokens, posts the report to the gateway):**
 
@@ -281,7 +282,7 @@ Report schema: `{"generated_at", "git_commit", "probes": [{"id","category","desc
 | L3 | Log | Live log scan: no raw prompt or response text present | Pass |
 | C1 | Config | No service privileged, host network, host PID, devices, or docker.sock mount | Pass |
 | C2 | Config | Every custom service: non-root, `cap_drop ALL`, `no-new-privileges`, read-only root | Pass (documented exceptions only) |
-| C3 | Config | Networks `red-net`, `blue-net`, `model-net`, `log-net` internal; each service attached to exactly the expected networks | Pass |
+| C3 | Config | Networks `red-net`, `blue-net`, `model-red-net`, `model-blue-net`, `log-net` internal; each service attached to exactly the expected networks | Pass |
 | C4 | Config | Memory, CPU and pids limits set | Pass |
 | C5 | Config | Published ports are only the `web` ports | Pass |
 | C6 | Config | Secret mounts match §4 | Pass |

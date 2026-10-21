@@ -4,11 +4,17 @@
 # and prints the reply and latency.
 set -euo pipefail
 
-NETWORK_NAME="${COMPOSE_PROJECT_NAME:-bayora}_model-net"
-MODEL_HOST="${MODEL_HOST:-model}"
+TARGET="${1:-red}"
+if [ "$TARGET" = "blue" ]; then
+    NETWORK_NAME="${COMPOSE_PROJECT_NAME:-bayora}_model-blue-net"
+    MODEL_HOST="${MODEL_HOST:-model-blue}"
+else
+    NETWORK_NAME="${COMPOSE_PROJECT_NAME:-bayora}_model-red-net"
+    MODEL_HOST="${MODEL_HOST:-model-red}"
+fi
 MODEL_PORT="${MODEL_PORT:-8080}"
 
-echo "=== Bayora Model Smoke Test ==="
+echo "=== Bayora Model Smoke Test (${MODEL_HOST}) ==="
 echo "Target Network: ${NETWORK_NAME}"
 echo "Target Endpoint: http://${MODEL_HOST}:${MODEL_PORT}/v1/chat/completions"
 

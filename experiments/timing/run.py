@@ -8,11 +8,13 @@ Source of Truth:
   - docs/verified-notes.md (§3, §4, §5)
 
 Hypothesis & Threat Model (§9):
-  In `shared` mode (deliberately weak baseline), llama.cpp reuses the prompt
-  KV-cache when an attacker prompt shares a prefix with a recent victim prompt,
-  allowing an attacker to infer victim prompt contents via response latency.
-  In `isolated` mode (Bayora default), the gateway pins red to slot 0 and blue
-  to slot 1, preventing cross-tenant KV-cache reuse.
+  In `shared` mode (deliberately weak baseline), both tenants are routed to the
+  same model instance (model-red), enabling cross-tenant prompt KV-cache reuse.
+  When an attacker prompt shares a prefix with a recent victim prompt, the attacker
+  can infer victim prompt contents via faster response latency.
+  In `isolated` mode (Bayora default, §9 fallback), the gateway routes red to model-red
+  (on internal model-red-net) and blue to model-blue (on internal model-blue-net),
+  physically isolating KV-cache across tenants on separate instances and networks.
 
 Protocol (§9):
   1. Warm-up requests; discard.
@@ -378,6 +380,7 @@ def collect_environment_info(repo_root: str) -> dict[str, Any]:
         "python_version": sys.version.split()[0],
         "model_file": os.environ.get("MODEL_FILE", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
         "llamacpp_version": "ghcr.io/ggml-org/llama.cpp:server-b11382",
+        "model_architecture": "dual-instance (model-red on model-red-net, model-blue on model-blue-net; §9 fallback)",
     }
     # Read model from .env if present
     env_path = os.path.join(repo_root, ".env")

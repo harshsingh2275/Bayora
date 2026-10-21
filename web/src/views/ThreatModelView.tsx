@@ -23,14 +23,14 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
     {
       id: 'SI-03',
       title: 'Strict Network Bridge Partitions',
-      desc: 'red-net, blue-net, model-net, log-net are internal bridges. Only Gateway bridges multiple networks. Tenants have zero egress.',
+      desc: 'red-net, blue-net, model-red-net, model-blue-net, log-net are internal bridges. Only Gateway bridges multiple networks. Tenants have zero egress.',
       mechanism: 'compose: internal: true on tenant bridges, no default gateway, no internet access',
     },
     {
       id: 'SI-04',
       title: 'Exclusive Gateway Mediation',
-      desc: 'The Gateway is the only route to the Model. Only Gateway communicates with Logger. Tenants never reach Model or Logger directly.',
-      mechanism: 'compose network attachments: model and logger only on internal model-net / log-net',
+      desc: 'The Gateway is the only route to the Models. Only Gateway communicates with Logger. Tenants never reach Models or Logger directly.',
+      mechanism: 'compose network attachments: model-red on model-red-net, model-blue on model-blue-net, logger on log-net',
     },
     {
       id: 'SI-05',

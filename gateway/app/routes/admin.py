@@ -321,7 +321,7 @@ TOPOLOGY_DATA = {
         {
             "name": "gateway",
             "image": "Python 3.12, FastAPI",
-            "networks": ["front-net", "red-net", "blue-net", "model-net", "log-net"],
+            "networks": ["front-net", "red-net", "blue-net", "model-red-net", "model-blue-net", "log-net"],
             "purpose": "Central coordinator, authorization, scoring, and proxy",
             "tcb": True,
             "isolated": False,
@@ -329,8 +329,24 @@ TOPOLOGY_DATA = {
         {
             "name": "model",
             "image": "llama.cpp server",
-            "networks": ["model-net"],
-            "purpose": "Client LLM under test (isolated on model-net)",
+            "networks": ["model-red-net", "model-blue-net"],
+            "purpose": "Client LLM under test (dual instances model-red & model-blue, §9 fallback)",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "model-red",
+            "image": "llama.cpp server",
+            "networks": ["model-red-net"],
+            "purpose": "Client LLM instance dedicated to red tenant (isolated on model-red-net)",
+            "tcb": False,
+            "isolated": True,
+        },
+        {
+            "name": "model-blue",
+            "image": "llama.cpp server",
+            "networks": ["model-blue-net"],
+            "purpose": "Client LLM instance dedicated to blue tenant (isolated on model-blue-net)",
             "tcb": False,
             "isolated": True,
         },
@@ -389,8 +405,20 @@ TOPOLOGY_DATA = {
         {
             "name": "model-net",
             "internal": True,
-            "description": "Internal network for target LLM model server and gateway (SI-03)",
-            "services": ["model", "gateway"],
+            "description": "Internal network cluster for target LLM model servers and gateway (SI-03)",
+            "services": ["model", "model-red", "model-blue", "gateway"],
+        },
+        {
+            "name": "model-red-net",
+            "internal": True,
+            "description": "Internal network for red tenant model server and gateway (SI-03)",
+            "services": ["model-red", "gateway"],
+        },
+        {
+            "name": "model-blue-net",
+            "internal": True,
+            "description": "Internal network for blue tenant model server and gateway (SI-03)",
+            "services": ["model-blue", "gateway"],
         },
         {
             "name": "log-net",
@@ -402,8 +430,8 @@ TOPOLOGY_DATA = {
     "invariants": [
         "No container is privileged; no host networking or devices (SI-01)",
         "Non-root user, cap_drop ALL, no-new-privileges, read-only root with tmpfs (SI-02)",
-        "Tenant networks (red-net, blue-net, model-net, log-net) are internal: true (SI-03)",
-        "Gateway is the sole route to the model and logger (SI-04)",
+        "Tenant networks (red-net, blue-net, model-red-net, model-blue-net, log-net) are internal: true (SI-03)",
+        "Gateway is the sole route to the models and logger (SI-04)",
         "Public proxy exposes /api/* only; /v1/* blocked with 404 (SI-11)",
     ],
 }

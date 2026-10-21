@@ -22,6 +22,8 @@ import httpx
 
 from .config import (
     ATTACK_MAX_TOKENS,
+    MODEL_BLUE_URL,
+    MODEL_RED_URL,
     MODEL_SYSTEM_PROMPT,
     MODEL_TEMPERATURE,
     MODEL_URL,
@@ -32,6 +34,22 @@ log = logging.getLogger("gateway.model_client")
 # SECURITY SI-08: These are the ONLY fields we extract from the model response.
 # Anything not in this set is silently dropped before reaching any caller.
 _WHITELISTED_RESPONSE_FIELDS: frozenset[str] = frozenset({"text"})
+
+
+def get_model_url(role: Literal["red", "blue"] | None, cache_mode: str) -> str:
+    """
+    Route model request to the appropriate model instance (Architecture §9 fallback):
+    - In 'shared' mode: both tenants route to the same instance (model-red)
+      so prefix KV-cache reuse occurs across tenants.
+    - In 'isolated' mode: blue routes to model-blue (on model-blue-net),
+      and red routes to model-red (on model-red-net), physically isolating KV cache.
+    """
+    if cache_mode == "shared":
+        # Shared mode: both tenants routed to the same instance (model-red)
+        return MODEL_RED_URL
+    if role == "blue":
+        return MODEL_BLUE_URL
+    return MODEL_RED_URL
 
 
 def _extract_text(raw: dict) -> str:
@@ -76,16 +94,13 @@ def _build_request_body(
         "stream": False,
     }
 
+    # Prompt caching is active; physical tenant instance routing enforces isolation in isolated mode
+    body["cache_prompt"] = True
     if cache_mode == "isolated" and role is not None:
-        # SECURITY SI-06: Slot isolation pins tenants to non-overlapping KV slots.
-        # Red → slot 0, Blue → slot 1 (verified: docs/verified-notes.md §3)
         slot = 0 if role == "red" else 1
         body["id_slot"] = slot          # verified field name
-        body["cache_prompt"] = True     # enable cache within the pinned slot
         log.debug({"event": "model_request_slot", "role": role, "slot": slot, "mode": "isolated"})
     else:
-        # shared mode: no slot pinning; prompt caching on (architecture §9)
-        body["cache_prompt"] = True
         log.debug({"event": "model_request_slot", "role": role, "mode": "shared"})
 
     return body
@@ -103,6 +118,7 @@ async def call_model(
     Send a chat-completion request to the model server and return ONLY the
     assistant text.
 
+    SECURITY SI-04 / §9 fallback: Routes by tenant to model-red or model-blue.
     SECURITY SI-06: builds the request itself; never forwards client params.
     SECURITY SI-08: strips all non-whitelisted fields from the response.
     """
@@ -112,8 +128,9 @@ async def call_model(
         role=role,
         cache_mode=cache_mode,
     )
+    target_url = get_model_url(role, cache_mode)
 
-    async with httpx.AsyncClient(base_url=MODEL_URL, timeout=timeout) as client:
+    async with httpx.AsyncClient(base_url=target_url, timeout=timeout) as client:
         resp = await client.post("/v1/chat/completions", json=body)
         resp.raise_for_status()
         raw: dict = resp.json()
@@ -125,17 +142,18 @@ async def call_model(
 
 async def erase_slot(slot_id: int, timeout: float = 5.0) -> None:
     """
-    Erase the KV cache for a slot after run conclusion.
+    Erase the KV cache for a slot across both model instances after run conclusion.
     Verified endpoint: POST /slots/{id_slot}?action=erase (docs/verified-notes.md §5).
     No-op if the server returns non-200 (best-effort; not fail-closed).
     """
-    try:
-        async with httpx.AsyncClient(base_url=MODEL_URL, timeout=timeout) as client:
-            resp = await client.post(f"/slots/{slot_id}?action=erase")
-            if resp.status_code == 200:
-                log.info({"event": "slot_erased", "slot_id": slot_id})
-            else:
-                log.warning({"event": "slot_erase_failed", "slot_id": slot_id,
-                             "status": resp.status_code})
-    except Exception as exc:
-        log.warning({"event": "slot_erase_error", "slot_id": slot_id, "error": str(exc)})
+    for base_url in (MODEL_RED_URL, MODEL_BLUE_URL):
+        try:
+            async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
+                resp = await client.post(f"/slots/{slot_id}?action=erase")
+                if resp.status_code == 200:
+                    log.info({"event": "slot_erased", "slot_id": slot_id, "url": base_url})
+                else:
+                    log.warning({"event": "slot_erase_failed", "slot_id": slot_id,
+                                 "url": base_url, "status": resp.status_code})
+        except Exception as exc:
+            log.warning({"event": "slot_erase_error", "slot_id": slot_id, "url": base_url, "error": str(exc)})
