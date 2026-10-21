@@ -14,27 +14,27 @@ import { ArchitectureDiagram } from '../components/diagram/ArchitectureDiagram';
 
 const PadlockIcon = () => (
   <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-    <rect x="7" y="16" width="22" height="17" rx="3" fill="var(--accent-red-bg)" stroke="var(--accent-red-team)" strokeWidth="1.5" />
-    <path d="M12 16v-5a6 6 0 0 1 12 0v5" stroke="var(--accent-red-team)" strokeWidth="1.5" strokeLinecap="round" />
-    <circle cx="18" cy="24" r="3" fill="var(--accent-red-team)" />
-    <line x1="18" y1="27" x2="18" y2="30" stroke="var(--accent-red-team)" strokeWidth="1.5" strokeLinecap="round" />
+    <rect x="7" y="16" width="22" height="17" rx="3" fill="#E6ECE8" stroke="#2E4A36" strokeWidth="1.5" />
+    <path d="M12 16v-5a6 6 0 0 1 12 0v5" stroke="#2E4A36" strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="18" cy="24" r="3" fill="#2E4A36" />
+    <line x1="18" y1="27" x2="18" y2="30" stroke="#2E4A36" strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 );
 
 const ShieldMediationIcon = () => (
   <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-    <path d="M18 4L6 9v9c0 7.18 5.14 13.88 12 15.48C24.86 31.88 30 25.18 30 18V9L18 4z" fill="var(--accent-gateway-bg)" stroke="var(--accent-gateway)" strokeWidth="1.5" strokeLinejoin="round" />
-    <path d="M13 18l3.5 3.5L24 14" stroke="var(--accent-gateway)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M18 4L6 9v9c0 7.18 5.14 13.88 12 15.48C24.86 31.88 30 25.18 30 18V9L18 4z" fill="#E6ECE8" stroke="#2E4A36" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M13 18l3.5 3.5L24 14" stroke="#2E4A36" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
 const VerifiedHashIcon = () => (
   <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-    <rect x="6" y="8" width="24" height="20" rx="3" fill="var(--status-pass-bg)" stroke="var(--status-pass-text)" strokeWidth="1.5" />
-    <line x1="11" y1="14" x2="25" y2="14" stroke="var(--status-pass-text)" strokeWidth="1.25" strokeLinecap="round" />
-    <line x1="11" y1="18" x2="20" y2="18" stroke="var(--status-pass-text)" strokeWidth="1.25" strokeLinecap="round" />
-    <circle cx="26" cy="26" r="6" fill="var(--status-pass-bg)" stroke="var(--status-pass-text)" strokeWidth="1.5" />
-    <path d="M23 26l2 2 4-4" stroke="var(--status-pass-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <rect x="6" y="8" width="24" height="20" rx="3" fill="#E6ECE8" stroke="#2E4A36" strokeWidth="1.5" />
+    <line x1="11" y1="14" x2="25" y2="14" stroke="#2E4A36" strokeWidth="1.25" strokeLinecap="round" />
+    <line x1="11" y1="18" x2="20" y2="18" stroke="#2E4A36" strokeWidth="1.25" strokeLinecap="round" />
+    <circle cx="26" cy="26" r="6" fill="#E6ECE8" stroke="#2E4A36" strokeWidth="1.5" />
+    <path d="M23 26l2 2 4-4" stroke="#2E4A36" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -56,10 +56,10 @@ const TenSecondStrip: React.FC = () => (
     }}
   >
     {[
-      { num: '1', label: 'Red Team Attacks', color: 'var(--accent-red-team)', bg: 'var(--accent-red-bg)' },
-      { num: '2', label: 'Gateway Mediates & Isolates', color: 'var(--accent-gateway)', bg: 'var(--accent-gateway-bg)' },
-      { num: '3', label: 'SHA-256 Ledger Verifies', color: 'var(--status-pass-text)', bg: 'var(--status-pass-bg)' },
-    ].map(({ num, label, color, bg }) => (
+      { num: '1', label: 'Red Team Attacks' },
+      { num: '2', label: 'Gateway Mediates & Isolates' },
+      { num: '3', label: 'SHA-256 Ledger Verifies' },
+    ].map(({ num, label }) => (
       <span
         key={num}
         style={{
@@ -68,11 +68,11 @@ const TenSecondStrip: React.FC = () => (
           gap: 'var(--space-2)',
           padding: '6px 12px',
           borderRadius: 'var(--radius-pill)',
-          background: bg,
-          border: `1px solid ${color}`,
+          background: 'var(--bg-subtle)',
+          border: '1px solid var(--border-subtle)',
           fontSize: 'var(--text-xs)',
           fontWeight: 600,
-          color,
+          color: 'var(--accent-primary)',
           whiteSpace: 'nowrap',
         }}
       >
@@ -81,7 +81,7 @@ const TenSecondStrip: React.FC = () => (
             width: 18,
             height: 18,
             borderRadius: '50%',
-            background: color,
+            background: 'var(--accent-primary)',
             color: '#fff',
             display: 'inline-flex',
             alignItems: 'center',
@@ -498,7 +498,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate }) => {
               phase="Phase 01"
               title="Sealed Commit"
               description="Red commits SHA-256 digests of all test prompts. Blue commits the defense rule bundle digest. Both digests are immutably logged before execution begins."
-              accentColor="var(--accent-red-team)"
+              accentColor="var(--accent-primary)"
             />
             {/* Desktop arrow connector (hidden on mobile) */}
             <PipelineStep
@@ -506,14 +506,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate }) => {
               phase="Phase 02"
               title="Mediated Execution"
               description="Prompts execute in random order through the Gateway. Audit events record digests only (SI-08). Raw prompt and response texts remain sealed to prevent mid-run leakage."
-              accentColor="var(--accent-gateway)"
+              accentColor="var(--accent-primary)"
             />
             <PipelineStep
               icon={<VerifiedHashIcon />}
               phase="Phase 03"
               title="Verified Revelation"
               description="Upon conclusion, the ASR is computed. The independent Verifier walks the entire SHA-256 chain and checks Ed25519 signatures, proving historical non-tampering."
-              accentColor="var(--status-pass-text)"
+              accentColor="var(--accent-primary)"
             />
           </div>
         </div>
@@ -552,7 +552,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate }) => {
                       {breakit.summary.passed}/{breakit.summary.total} passed
                     </span>
                     {breakit.summary.failed === 0 ? (
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--status-pass-text)', animation: 'pulse-dot 2s ease-in-out infinite', display: 'inline-block' }} />
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-primary)', animation: 'pulse-dot 2s ease-in-out infinite', display: 'inline-block' }} />
                     ) : (
                       <span style={{ color: 'var(--status-fail-text)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 700 }}>
                         {breakit.summary.failed} failed
@@ -568,7 +568,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate }) => {
               description="Empirical timing distributions measure KV-cache cross-tenant leakage. When isolated cache mode is active, prefix cache state is strictly partitioned, yielding indistinguishable latency distributions."
               linkLabel="View Latency Distributions"
               onLink={() => onNavigate('timing')}
-              color="var(--accent-gateway)"
+              color="var(--accent-primary)"
               indicator={
                 timing?.modes?.isolated ? (
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 600, color: timing.modes.isolated.verdict === 'no_leak_detected' ? 'var(--status-pass-text)' : 'var(--status-warn-text)' }}>

@@ -84,33 +84,210 @@ const RunsKpiStrip: React.FC<RunsKpiProps> = ({ runs }) => {
   const active = runs.filter(r => ['running', 'committing', 'created'].includes(r.state)).length;
   const aborted = runs.filter(r => ['aborted', 'failed'].includes(r.state)).length;
 
+  // Unified forest/stone palette — no rainbow multi-color borders
+  const forestBorder = '3px solid var(--accent-primary)';
+
   return (
     <div className="kpi-grid" style={{ marginBottom: 'var(--space-7)' }}>
       <div className="kpi-card">
         <div className="kpi-card__label">Total Runs</div>
         <div className="kpi-card__value">{total}</div>
       </div>
-      <div className="kpi-card" style={{ borderLeft: '3px solid var(--status-pass-text)' }}>
+      <div className="kpi-card" style={{ borderLeft: forestBorder }}>
         <div className="kpi-card__label">Concluded</div>
-        <div className="kpi-card__value" style={{ color: 'var(--status-pass-text)' }}>{concluded}</div>
+        <div className="kpi-card__value">{concluded}</div>
       </div>
-      <div className="kpi-card" style={{ borderLeft: '3px solid var(--status-info-text)' }}>
+      <div className="kpi-card" style={{ borderLeft: forestBorder }}>
         <div className="kpi-card__label">Active / Running</div>
-        <div className="kpi-card__value" style={{ color: 'var(--status-info-text)' }}>{active}</div>
+        <div className="kpi-card__value">{active}</div>
         {active > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-info-text)', animation: 'pulse-dot 2s ease-in-out infinite', display: 'inline-block' }} />
-            <span className="kpi-card__sub">Live</span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-primary)', animation: 'pulse-dot 2s ease-in-out infinite', display: 'inline-block' }} />
+            <span className="kpi-card__sub" style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>Live</span>
           </div>
         )}
       </div>
-      <div className="kpi-card" style={{ borderLeft: '3px solid var(--status-warn-text)' }}>
+      <div className="kpi-card" style={{ borderLeft: forestBorder }}>
         <div className="kpi-card__label">Aborted / Failed</div>
-        <div className="kpi-card__value" style={{ color: aborted > 0 ? 'var(--status-warn-text)' : 'var(--text-muted)' }}>{aborted}</div>
+        <div className="kpi-card__value" style={{ color: aborted > 0 ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{aborted}</div>
       </div>
     </div>
   );
 };
+
+// ── Create Run Modal (top-level stable component — never inside RunsView body)
+// IMPORTANT: This must live at module scope, NOT inside RunsView, so React never
+// unmounts it during the 2.5s background polling re-render that updates `runs`.
+// Draft string state for Attack Count and Seed lets the user freely backspace
+// and type multi-digit numbers; we only parseInt on submit.
+
+interface CreateRunModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: (runId: string) => void;
+  adminToken: string | null;
+}
+
+const CreateRunModal: React.FC<CreateRunModalProps> = React.memo(({ isOpen, onClose, onCreated, adminToken }) => {
+  const [name, setName] = useState('');
+  // Store as strings so user can clear box and type freely — no cursor jump
+  const [attackCountInput, setAttackCountInput] = useState('5');
+  const [seedInput, setSeedInput] = useState('42');
+  const [bundle, setBundle] = useState<'baseline' | 'hardened'>('baseline');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset form only when modal opens (not on every render)
+  const prevOpen = React.useRef(false);
+  useEffect(() => {
+    if (isOpen && !prevOpen.current) {
+      setName('');
+      setAttackCountInput('5');
+      setSeedInput('42');
+      setBundle('baseline');
+      setError(null);
+    }
+    prevOpen.current = isOpen;
+  }, [isOpen]);
+
+  const handleClose = () => {
+    setError(null);
+    onClose();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminToken) { setError('Operator token required'); return; }
+    const attackCount = parseInt(attackCountInput, 10);
+    const seed = parseInt(seedInput, 10);
+    if (isNaN(attackCount) || attackCount < 1 || attackCount > 100) {
+      setError('Attack Count must be a number between 1 and 100');
+      return;
+    }
+    if (isNaN(seed)) {
+      setError('Seed must be a valid integer');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const req: CreateRunRequest = {
+        name: name.trim() || `eval-run-${Date.now().toString().slice(-4)}`,
+        attack_count: attackCount,
+        seed,
+        bundle,
+      };
+      const res = await apiClient.createRun(req, adminToken);
+      onCreated(res.run_id);
+      handleClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create run');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Create Evaluation Run" maxWidth="480px">
+      <form onSubmit={handleSubmit}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div>
+            <label htmlFor="cr-run-name" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+              Run Name
+            </label>
+            <input
+              id="cr-run-name"
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. hardened-baseline-v1"
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+            <div>
+              <label htmlFor="cr-attack-count" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+                Attack Count (1–100)
+              </label>
+              {/* String input so user can freely backspace and type any number */}
+              <input
+                id="cr-attack-count"
+                type="text"
+                inputMode="numeric"
+                value={attackCountInput}
+                onChange={e => setAttackCountInput(e.target.value.replace(/[^0-9]/g, ''))}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label htmlFor="cr-seed" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+                Seed
+              </label>
+              <input
+                id="cr-seed"
+                type="text"
+                inputMode="numeric"
+                value={seedInput}
+                onChange={e => setSeedInput(e.target.value.replace(/[^0-9-]/g, ''))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="cr-bundle" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+              Defense Bundle
+            </label>
+            <select
+              id="cr-bundle"
+              value={bundle}
+              onChange={e => setBundle(e.target.value as 'baseline' | 'hardened')}
+              style={{ width: '100%' }}
+            >
+              <option value="baseline">baseline — few weak rules (high ASR expected)</option>
+              <option value="hardened">hardened — broader rules (lower ASR expected)</option>
+            </select>
+          </div>
+
+          {error && (
+            <div
+              style={{
+                padding: 'var(--space-3)',
+                background: 'var(--status-fail-bg)',
+                border: '1px solid var(--status-fail-border)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--status-fail-text)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-xs)',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting}
+            >
+              {submitting ? 'Creating…' : 'Create Run'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+});
 
 // ── Run detail panel ──────────────────────────────────────────────────────────
 
@@ -432,14 +609,8 @@ export const RunsView: React.FC<RunsViewProps> = ({
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
 
-  // Create Run Modal
+  // Create Run Modal (state lives here only to control open/closed)
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [createAttackCount, setCreateAttackCount] = useState(5);
-  const [createSeed, setCreateSeed] = useState(42);
-  const [createBundle, setCreateBundle] = useState<'baseline' | 'hardened'>('baseline');
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
   // Operator Inspect Item Modal
   const [inspectItem, setInspectItem] = useState<OperatorRunItemResponse | null>(null);
@@ -512,29 +683,10 @@ export const RunsView: React.FC<RunsViewProps> = ({
     if (onSelectRun) onSelectRun(next);
   };
 
-  const handleCreateRun = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adminToken) { setCreateError('Operator token required'); return; }
-    setCreateSubmitting(true);
-    setCreateError(null);
-    try {
-      const req: CreateRunRequest = {
-        name: createName || `eval-run-${Date.now().toString().slice(-4)}`,
-        attack_count: createAttackCount,
-        seed: createSeed,
-        bundle: createBundle,
-      };
-      const res = await apiClient.createRun(req, adminToken);
-      setIsCreateOpen(false);
-      setCreateName('');
-      await fetchRuns();
-      setSelectedRunId(res.run_id);
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'Failed to create run');
-    } finally {
-      setCreateSubmitting(false);
-    }
-  };
+  const handleRunCreated = useCallback(async (runId: string) => {
+    await fetchRuns();
+    setSelectedRunId(runId);
+  }, [fetchRuns]);
 
   const handleAbortRun = async (runId: string) => {
     if (!adminToken) return;
@@ -835,104 +987,13 @@ export const RunsView: React.FC<RunsViewProps> = ({
         )}
       </div>
 
-      {/* ── Create Run Modal ─────────────────────────────────────────────────── */}
-      <Modal isOpen={isCreateOpen} onClose={() => { setIsCreateOpen(false); setCreateError(null); }} title="Create Evaluation Run" maxWidth="480px">
-        <form onSubmit={handleCreateRun}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div>
-              <label htmlFor="run-name" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
-                Run Name
-              </label>
-              <input
-                id="run-name"
-                type="text"
-                value={createName}
-                onChange={e => setCreateName(e.target.value)}
-                placeholder="e.g. hardened-baseline-v1"
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-              <div>
-                <label htmlFor="attack-count" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
-                  Attack Count (1–100)
-                </label>
-                <input
-                  id="attack-count"
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={createAttackCount}
-                  onChange={e => setCreateAttackCount(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label htmlFor="seed" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
-                  Seed
-                </label>
-                <input
-                  id="seed"
-                  type="number"
-                  value={createSeed}
-                  onChange={e => setCreateSeed(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="bundle" style={{ display: 'block', fontWeight: 600, marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
-                Defense Bundle
-              </label>
-              <select
-                id="bundle"
-                value={createBundle}
-                onChange={e => setCreateBundle(e.target.value as 'baseline' | 'hardened')}
-                style={{ width: '100%' }}
-              >
-                <option value="baseline">baseline — few weak rules (high ASR expected)</option>
-                <option value="hardened">hardened — broader rules (lower ASR expected)</option>
-              </select>
-            </div>
-
-            {createError && (
-              <div
-                style={{
-                  padding: 'var(--space-3)',
-                  background: 'var(--status-fail-bg)',
-                  border: '1px solid var(--status-fail-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--status-fail-text)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                }}
-              >
-                {createError}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => { setIsCreateOpen(false); setCreateError(null); }}
-                disabled={createSubmitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={createSubmitting}
-              >
-                {createSubmitting ? 'Creating…' : 'Create Run'}
-              </button>
-            </div>
-          </div>
-        </form>
-      </Modal>
+      {/* ── Create Run Modal (stable top-level component — never re-mounts on poll) */}
+      <CreateRunModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreated={handleRunCreated}
+        adminToken={adminToken}
+      />
     </div>
   );
 };

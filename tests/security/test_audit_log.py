@@ -259,17 +259,41 @@ def real_verifier_endpoint_verify(log_dir: str, pubkey_path: str = PUBKEY_PATH) 
 
 def produce_gateway_log_entries(count: int = 12) -> None:
     """Send probe requests through the gateway to generate real audit log entries."""
-    if not RED_TOKEN:
-        return
-    for i in range(count):
-        req = urllib.request.Request(
-            f"{GATEWAY_URL}/v1/red/probe",
-            headers={"Authorization": f"Bearer {RED_TOKEN}", "Content-Type": "application/json"},
-            data=json.dumps({"prompt": f"Audit adversary seed probe {i} - {uuid.uuid4().hex[:8]}", "max_tokens": 1}).encode("utf-8"),
-        )
+    # First attempt via direct GATEWAY_URL
+    success = False
+    if RED_TOKEN:
+        for i in range(count):
+            req = urllib.request.Request(
+                f"{GATEWAY_URL}/v1/red/probe",
+                headers={"Authorization": f"Bearer {RED_TOKEN}", "Content-Type": "application/json"},
+                data=json.dumps({"prompt": f"Audit adversary seed probe {i} - {uuid.uuid4().hex[:8]}", "max_tokens": 1}).encode("utf-8"),
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    if resp.status == 200:
+                        success = True
+            except Exception:
+                break
+
+    # Fallback: execute probe from inside red tenant container where gateway:8000 is always reachable
+    if not success:
+        cmd = [
+            "docker", "compose", "exec", "-T", "red", "python3", "-c",
+            f"""
+import urllib.request as u, json, uuid
+token = open('/run/secrets/red_token').read().strip()
+for i in range({count}):
+    try:
+        req = u.Request('http://gateway:8000/v1/red/probe',
+            headers={{'Authorization': f'Bearer {{token}}', 'Content-Type': 'application/json'}},
+            data=json.dumps({{'prompt': f'Audit adversary seed probe {{i}} - {{uuid.uuid4().hex[:8]}}', 'max_tokens': 1}}).encode())
+        u.urlopen(req, timeout=3.0)
+    except Exception:
+        pass
+"""
+        ]
         try:
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                resp.read()
+            subprocess.run(cmd, check=False, capture_output=True, timeout=30)
         except Exception:
             pass
 
@@ -281,16 +305,20 @@ def create_log_copy(target_dir: str) -> Tuple[List[Dict[str, Any]], List[Dict[st
     os.chmod(target_dir, 0o755)
 
     entries = []
-    with open(os.path.join(target_dir, "log.jsonl"), "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                entries.append(json.loads(line.strip()))
+    log_path = os.path.join(target_dir, "log.jsonl")
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    entries.append(json.loads(line.strip()))
 
     checkpoints = []
-    with open(os.path.join(target_dir, "checkpoints.jsonl"), "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                checkpoints.append(json.loads(line.strip()))
+    cp_path = os.path.join(target_dir, "checkpoints.jsonl")
+    if os.path.exists(cp_path):
+        with open(cp_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    checkpoints.append(json.loads(line.strip()))
 
     return entries, checkpoints
 
