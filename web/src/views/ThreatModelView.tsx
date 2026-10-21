@@ -83,291 +83,284 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
-      {/* Header */}
-      <div
-        style={{
-          borderBottom: '1px solid var(--color-border-subtle)',
-          paddingBottom: 'var(--space-6)',
-        }}
-      >
+    <div style={{ paddingBottom: '6rem' }}>
+      <div className="container" style={{ paddingTop: '2.5rem' }}>
+        {/* Header */}
         <div
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-xs)',
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--color-primary)',
-            marginBottom: 'var(--space-2)',
+            borderBottom: '1px solid var(--border-subtle)',
+            paddingBottom: 'var(--space-6)',
+            marginBottom: 'var(--space-8)',
           }}
         >
-          Architectural Rigor
-        </div>
-        <h1
-          style={{
-            fontFamily: 'var(--font-serif)',
-            fontSize: 'var(--text-3xl)',
-            fontWeight: 400,
-            color: 'var(--color-text-primary)',
-            margin: '0 0 var(--space-2) 0',
-          }}
-        >
-          Formal Threat Model & Boundaries
-        </h1>
-        <p
-          style={{
-            fontFamily: 'var(--font-sans)',
-            fontSize: 'var(--text-base)',
-            color: 'var(--color-text-secondary)',
-            maxWidth: '720px',
-            margin: 0,
-          }}
-        >
-          Bayora executes hostile code and untrusted prompts in a shared container environment.
-          This threat model defines the trusted computing base, enforced security invariants,
-          explicit non-guarantees, and failure modes.
-        </p>
-      </div>
-
-      {/* Protects vs Does Not Protect Grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: 'var(--space-6)',
-        }}
-      >
-        {/* Protects Against */}
-        <div
-          style={{
-            border: '1px solid var(--color-border-subtle)',
-            backgroundColor: 'var(--color-bg-surface)',
-            padding: 'var(--space-6)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-4)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 700,
-              color: 'var(--color-primary)',
-              textTransform: 'uppercase',
-            }}
-          >
-            <ShieldCheckIcon size={16} />
-            <span>Guaranteed Protections</span>
-          </div>
-
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: 'var(--space-4)',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-sm)',
-              color: 'var(--color-text-secondary)',
-              lineHeight: 1.6,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Pre-conclusion cross-tenant inspection:</strong> Red
-              cannot inspect Blue defense bundles, and Blue cannot inspect Red attack prompts prior to run conclusion.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Post-commitment input tampering:</strong> SHA-256
-              commitments bind the attack set and defense rules before execution; uncommitted prompts are rejected.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Direct model access & parameter tampering:</strong> Tenants
-              cannot bypass the gateway or supply sampling parameters or slot IDs.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Cross-tenant prefix-cache timing leak:</strong> In isolated
-              mode, distinct slot allocation prevents prompt-cache latency leakage.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Undetected history tampering:</strong> Append-only SHA-256
-              hash chain with Ed25519 signatures catches modifications, reordering, and deletions.
-            </li>
-          </ul>
-        </div>
-
-        {/* Does Not Protect Against */}
-        <div
-          style={{
-            border: '1px solid var(--color-border-subtle)',
-            backgroundColor: 'var(--color-bg-surface)',
-            padding: 'var(--space-6)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-4)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 700,
-              color: 'var(--color-accent)',
-              textTransform: 'uppercase',
-            }}
-          >
-            <AlertTriangleIcon size={16} />
-            <span>Residual Risks & Non-Guarantees</span>
-          </div>
-
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: 'var(--space-4)',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-sm)',
-              color: 'var(--color-text-secondary)',
-              lineHeight: 1.6,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Kernel & runtime escape:</strong> Containers share a single
-              Linux kernel; kernel zero-days or Docker daemon vulnerabilities would bypass isolation.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>TCB compromise:</strong> Host operating system, Gateway, and
-              audit logger form the trusted base; compromising them breaks integrity.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Black-box behavioral inference:</strong> Attackers observe
-              which requests are blocked, allowing behavioral inference of filter rules.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Hardware resource contention timing:</strong> Heavy CPU load
-              can introduce general execution jitter between concurrent tenants.
-            </li>
-            <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Log tail truncation after latest checkpoint:</strong> Truncating
-              entries after the latest signed checkpoint requires an external witness anchor to detect.
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      {/* Security Invariants Matrix */}
-      <div>
-        <div style={{ marginBottom: 'var(--space-4)' }}>
           <div
             style={{
               fontFamily: 'var(--font-mono)',
               fontSize: 'var(--text-xs)',
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'var(--color-primary)',
-              marginBottom: 'var(--space-1)',
+              color: 'var(--accent-primary)',
+              marginBottom: 'var(--space-2)',
             }}
           >
-            Architectural Enforcement
+            Architectural Rigor & Trust Boundaries
           </div>
-          <h2
+          <h1
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 'var(--text-h1)',
+              fontWeight: 400,
+              lineHeight: 1.15,
+              color: 'var(--text-primary)',
+              margin: '0 0 var(--space-3) 0',
+            }}
+          >
+            Formal Threat Model & Boundaries
+          </h1>
+          <p
             style={{
               fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-xl)',
-              fontWeight: 600,
-              color: 'var(--color-text-primary)',
+              fontSize: 'var(--text-body)',
+              color: 'var(--text-secondary)',
+              maxWidth: '68ch',
+              lineHeight: 1.6,
               margin: 0,
             }}
           >
-            Security Invariant Ledger (SI-01 through SI-12)
-          </h2>
+            Bayora executes hostile code and untrusted prompts in a shared container environment.
+            This threat model defines the trusted computing base, enforced security invariants,
+            explicit non-guarantees, and failure modes.
+          </p>
         </div>
 
+        {/* 2-Column Split View: Guaranteed Protections vs Residual Risks */}
         <div
           style={{
-            border: '1px solid var(--color-border-subtle)',
-            backgroundColor: 'var(--color-bg-surface)',
-            overflowX: 'auto',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gap: '1.5rem',
+            marginBottom: 'var(--space-10)',
           }}
         >
-          <table
+          {/* Guaranteed Protections */}
+          <div
             style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 'var(--text-xs)',
-              textAlign: 'left',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderTop: '3px solid var(--accent-primary)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: 'var(--shadow-card)',
+              padding: 'var(--space-6)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
             }}
           >
-            <thead>
-              <tr
-                style={{
-                  backgroundColor: 'var(--color-bg-base)',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  fontFamily: 'var(--font-mono)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                <th style={{ padding: '8px 12px', width: '90px' }}>Invariant</th>
-                <th style={{ padding: '8px 12px' }}>Name & Property</th>
-                <th style={{ padding: '8px 12px' }}>Enforcement Mechanism</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invariants.map((inv) => (
-                <tr
-                  key={inv.id}
-                  style={{
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                  }}
-                >
-                  <td
-                    style={{
-                      padding: '10px 12px',
-                      fontFamily: 'var(--font-mono)',
-                      fontWeight: 700,
-                      color: 'var(--color-primary)',
-                    }}
-                  >
-                    {inv.id}
-                  </td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                      {inv.title}
-                    </div>
-                    <div
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 700,
+                color: 'var(--status-pass-text)',
+                textTransform: 'uppercase',
+              }}
+            >
+              <ShieldCheckIcon size={16} />
+              <span>Guaranteed Protections</span>
+            </div>
+
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: 'var(--space-4)',
+                fontFamily: 'var(--font-sans)',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.6,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Pre-conclusion cross-tenant inspection:</strong> Red
+                cannot inspect Blue defense bundles, and Blue cannot inspect Red attack prompts prior to run conclusion.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Post-commitment input tampering:</strong> SHA-256
+                commitments bind the attack set and defense rules before execution; uncommitted prompts are rejected.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Direct model access & parameter tampering:</strong> Tenants
+                cannot bypass the gateway or supply sampling parameters or slot IDs.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Cross-tenant prefix-cache timing leak:</strong> In isolated
+                mode, distinct slot allocation prevents prompt-cache latency leakage.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Undetected history tampering:</strong> Append-only SHA-256
+                hash chain with Ed25519 signatures catches modifications, reordering, and deletions.
+              </li>
+            </ul>
+          </div>
+
+          {/* Residual Risks & Non-Guarantees */}
+          <div
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderTop: '3px solid var(--status-warn-text)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: 'var(--shadow-card)',
+              padding: 'var(--space-6)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 700,
+                color: 'var(--status-warn-text)',
+                textTransform: 'uppercase',
+              }}
+            >
+              <AlertTriangleIcon size={16} />
+              <span>Residual Risks & Non-Guarantees</span>
+            </div>
+
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: 'var(--space-4)',
+                fontFamily: 'var(--font-sans)',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.6,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Kernel & runtime escape:</strong> Containers share a single
+                Linux kernel; kernel zero-days or Docker daemon vulnerabilities would bypass isolation.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>TCB compromise:</strong> Host operating system, Gateway, and
+                audit logger form the trusted base; compromising them breaks integrity.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Black-box behavioral inference:</strong> Attackers observe
+                which requests are blocked, allowing behavioral inference of filter rules.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Hardware resource contention timing:</strong> Heavy CPU load
+                can introduce general execution jitter between concurrent tenants.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Log tail truncation after latest checkpoint:</strong> Truncating
+                entries after the latest signed checkpoint requires an external witness anchor to detect.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Security Invariants Matrix */}
+        <div>
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <div
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-xs)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--accent-primary)',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
+              Architectural Enforcement
+            </div>
+            <h2
+              style={{
+                fontFamily: 'var(--font-sans)',
+                fontSize: 'var(--text-h2)',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                margin: 0,
+              }}
+            >
+              Security Invariant Ledger (SI-01 through SI-12)
+            </h2>
+          </div>
+
+          <div className="table-scroll-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: '110px', whiteSpace: 'nowrap' }}>Invariant</th>
+                  <th style={{ minWidth: 260 }}>Name & Property</th>
+                  <th style={{ minWidth: 280 }}>Enforcement Mechanism</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invariants.map((inv) => (
+                  <tr key={inv.id}>
+                    <td
                       style={{
-                        color: 'var(--color-text-secondary)',
-                        fontFamily: 'var(--font-sans)',
-                        marginTop: '2px',
-                        lineHeight: 1.5,
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 700,
+                        color: 'var(--accent-primary)',
                       }}
                     >
-                      {inv.desc}
-                    </div>
-                  </td>
-                  <td
-                    style={{
-                      padding: '10px 12px',
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--color-text-muted)',
-                      fontSize: '11px',
-                    }}
-                  >
-                    {inv.mechanism}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      {inv.id}
+                    </td>
+                    <td style={{ minWidth: 260 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {inv.title}
+                      </div>
+                      <div
+                        style={{
+                          color: 'var(--text-secondary)',
+                          fontFamily: 'var(--font-sans)',
+                          fontSize: 'var(--text-sm)',
+                          marginTop: '2px',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {inv.desc}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 280 }}>
+                      <span
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 'var(--text-xs)',
+                          color: 'var(--text-secondary)',
+                          background: 'var(--bg-subtle)',
+                          padding: '2px 6px',
+                          borderRadius: 'var(--radius-sm)',
+                          display: 'inline-block',
+                        }}
+                      >
+                        {inv.mechanism}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

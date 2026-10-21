@@ -4,38 +4,298 @@ import type {
   AuditLogEntry,
   VerifyResponse,
   TamperResponse,
+  TamperCase,
   ViewType,
 } from '../types/api';
-import { StatusBadge } from '../components/common/StatusBadge';
-import { HashDisplay } from '../components/common/HashDisplay';
-import { Modal } from '../components/common/Modal';
-import {
-  ShieldCheckIcon,
-  RefreshCwIcon,
-} from '../components/common/Icons';
 
 interface AuditLogViewProps {
   onNavigate?: (view: ViewType) => void;
 }
 
+// ── Actor color map ───────────────────────────────────────────────────────────
+
+function actorColor(actor: string): { color: string; bg: string } {
+  if (actor === 'red') return { color: 'var(--accent-red-team)', bg: 'var(--accent-red-bg)' };
+  if (actor === 'blue') return { color: 'var(--accent-blue-team)', bg: 'var(--accent-blue-bg)' };
+  if (actor === 'gateway' || actor === 'operator') return { color: 'var(--accent-gateway)', bg: 'var(--accent-gateway-bg)' };
+  return { color: 'var(--text-muted)', bg: 'var(--bg-subtle)' };
+}
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
+const RefreshIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M2.5 8A5.5 5.5 0 0 1 8 2.5c2.1 0 3.94 1.19 4.87 2.93" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M13.5 8A5.5 5.5 0 0 1 8 13.5c-2.1 0-3.94-1.19-4.87-2.93" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M11.5 2.5L13.37 5.37 10.5 4.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M4.5 13.5L2.63 10.63 5.5 11.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+const ShieldIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M8 2L3 4.5v4.25C3 11.75 5.5 14.25 8 15c2.5-.75 5-3.25 5-6.25V4.5L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+    <path d="M5.5 8.25L7.25 10 11 6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+const CopyIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x="6" y="6" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.25"/>
+    <path d="M4 10H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
+  </svg>
+);
+
+// ── Hash-chain block strip ────────────────────────────────────────────────────
+
+interface ChainStripProps { entries: AuditLogEntry[]; verification: VerifyResponse | null }
+
+const ChainStrip: React.FC<ChainStripProps> = ({ entries, verification }) => {
+  // Show genesis, a few middle blocks, and head
+  const blocks = entries.slice(-6);
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-inverse)',
+        borderRadius: 'var(--radius-md)',
+        padding: 'var(--space-5) var(--space-6)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-4)',
+        }}
+      >
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted-on-inverse)', marginBottom: 4 }}>
+            Cryptographic Hash-Chain Explorer
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--text-on-inverse)', fontWeight: 400 }}>
+            {verification?.entries ?? '—'} entries · {verification?.checkpoints ?? '—'} checkpoints
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          {verification && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 12px',
+                borderRadius: 'var(--radius-pill)',
+                background: verification.ok ? 'rgba(134,239,172,0.15)' : 'rgba(252,165,165,0.15)',
+                border: `1px solid ${verification.ok ? 'var(--status-pass-border)' : 'var(--status-fail-border)'}`,
+                color: verification.ok ? 'var(--status-pass-border)' : 'var(--status-fail-border)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 700,
+              }}
+            >
+              {verification.ok ? '✓ Chain Verified' : '✕ Verification Errors'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Block strip scroll area */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          overflowX: 'auto',
+          paddingBottom: 'var(--space-2)',
+        }}
+      >
+        {/* Genesis block */}
+        <div
+          style={{
+            flexShrink: 0,
+            background: 'var(--bg-inverse-elevated)',
+            border: '1px solid var(--border-inverse)',
+            borderRadius: 'var(--radius-sm)',
+            padding: 'var(--space-3) var(--space-4)',
+            minWidth: 150,
+          }}
+        >
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text-muted-on-inverse)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 2 }}>Genesis</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-on-inverse)', fontWeight: 600 }}>Seq #0</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted-on-inverse)', marginTop: 1 }}>prev: 0000…0000</div>
+        </div>
+
+        {entries.length > 6 && (
+          <>
+            <span style={{ color: 'var(--text-muted-on-inverse)', padding: '0 var(--space-2)', fontSize: 16, flexShrink: 0 }}>→</span>
+            <div style={{ flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted-on-inverse)', padding: '0 var(--space-2)', whiteSpace: 'nowrap' }}>
+              ··· {entries.length - 6} entries ···
+            </div>
+          </>
+        )}
+
+        {blocks.map((entry, i) => {
+          const isHead = i === blocks.length - 1;
+          return (
+            <React.Fragment key={entry.seq}>
+              <span style={{ color: 'var(--text-muted-on-inverse)', padding: '0 var(--space-2)', fontSize: 16, flexShrink: 0 }}>→</span>
+              <div
+                style={{
+                  flexShrink: 0,
+                  background: isHead
+                    ? verification?.ok ? 'rgba(134,239,172,0.08)' : 'rgba(252,165,165,0.08)'
+                    : 'var(--bg-inverse-elevated)',
+                  border: `1px solid ${isHead
+                    ? verification?.ok ? 'rgba(134,239,172,0.3)' : 'rgba(252,165,165,0.3)'
+                    : 'var(--border-inverse)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  minWidth: 160,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: isHead ? 'var(--status-pass-border)' : 'var(--text-muted-on-inverse)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    {isHead ? 'HEAD ' : ''}#{entry.seq}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text-muted-on-inverse)' }}>
+                    {entry.event}
+                  </span>
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text-on-inverse)', fontWeight: 600, letterSpacing: '0.02em' }}>
+                  {entry.hash.slice(0, 16)}…
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text-muted-on-inverse)', marginTop: 1 }}>
+                  prev: {entry.prev.slice(0, 8)}…
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* Copy HEAD hash */}
+      {verification?.head?.hash && (
+        <div style={{ marginTop: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted-on-inverse)' }}>HEAD hash:</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-on-inverse)', fontWeight: 600 }}>
+            {verification.head.hash}
+          </span>
+          <button
+            type="button"
+            onClick={() => navigator.clipboard?.writeText(verification.head.hash)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              padding: '2px 8px',
+              border: '1px solid var(--border-inverse)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--text-muted-on-inverse)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.65rem',
+              cursor: 'pointer',
+            }}
+            aria-label="Copy HEAD hash"
+          >
+            <CopyIcon /> Copy
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Tamper test matrix ────────────────────────────────────────────────────────
+
+const TamperTestMatrix: React.FC<{ tamperReport: TamperResponse }> = ({ tamperReport }) => (
+  <div
+    style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: 'var(--radius-md)',
+      overflow: 'hidden',
+    }}
+  >
+    <div style={{ padding: 'var(--space-4) var(--space-5)', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-subtle)' }}>
+      <div style={{ fontWeight: 600, fontSize: 'var(--text-h3)', color: 'var(--text-primary)', marginBottom: 4 }}>
+        Tamper Detection Results
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+        {tamperReport.summary.passed}/{tamperReport.summary.total} checks met expectations
+        {tamperReport.summary.limitations_acknowledged > 0 && ` · ${tamperReport.summary.limitations_acknowledged} known limitation(s) documented`}
+      </div>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 0 }}>
+      {tamperReport.cases.map((c: TamperCase) => (
+        <div
+          key={c.id}
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderBottom: '1px solid var(--border-subtle)',
+            borderRight: '1px solid var(--border-subtle)',
+            background: c.limitation ? 'var(--status-warn-bg)' : c.passed ? 'var(--status-pass-bg)' : 'var(--status-fail-bg)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-2)', marginBottom: 4 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--text-primary)' }}>
+              {c.id}
+            </span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '1px 6px',
+                borderRadius: 'var(--radius-sm)',
+                background: c.limitation ? 'var(--status-warn-bg)' : c.passed ? 'var(--status-pass-bg)' : 'var(--status-fail-bg)',
+                color: c.limitation ? 'var(--status-warn-text)' : c.passed ? 'var(--status-pass-text)' : 'var(--status-fail-text)',
+                border: `1px solid ${c.limitation ? 'var(--status-warn-border)' : c.passed ? 'var(--status-pass-border)' : 'var(--status-fail-border)'}`,
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {c.limitation ? 'EXPECTED LIMIT' : c.passed ? '✓ PASS' : '✕ FAIL'}
+            </span>
+          </div>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 4 }}>{c.description}</div>
+          {c.details && (
+            <details className="mono-chip">
+              <summary>Details</summary>
+              <pre>{c.details}</pre>
+            </details>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// ── Main view ─────────────────────────────────────────────────────────────────
+
 export const AuditLogView: React.FC<AuditLogViewProps> = () => {
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [verification, setVerification] = useState<VerifyResponse | null>(null);
   const [tamperReport, setTamperReport] = useState<TamperResponse | null>(null);
-
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [tamperTesting, setTamperTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Inspector modal for entry payload
   const [selectedEntry, setSelectedEntry] = useState<AuditLogEntry | null>(null);
+  const [logPage, setLogPage] = useState(0);
+  const LOG_PAGE_SIZE = 25;
 
   const fetchLogAndVerify = useCallback(async () => {
     try {
       setLoading(true);
       const [logData, verifyData] = await Promise.all([
-        apiClient.getAuditLog(100),
+        apiClient.getAuditLog(undefined, 200),
         apiClient.verifyAuditLog(),
       ]);
       setEntries(logData.entries || []);
@@ -48,9 +308,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchLogAndVerify();
-  }, [fetchLogAndVerify]);
+  useEffect(() => { fetchLogAndVerify(); }, [fetchLogAndVerify]);
 
   const handleVerifyNow = async () => {
     setVerifying(true);
@@ -70,188 +328,20 @@ export const AuditLogView: React.FC<AuditLogViewProps> = () => {
       const res = await apiClient.runTamperTest();
       setTamperReport(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Tamper test execution failed');
+      setError(err instanceof Error ? err.message : 'Tamper test failed');
     } finally {
       setTamperTesting(false);
     }
   };
 
+  const totalLogPages = Math.ceil(entries.length / LOG_PAGE_SIZE);
+  const pagedEntries = entries.slice(logPage * LOG_PAGE_SIZE, (logPage + 1) * LOG_PAGE_SIZE);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 'var(--space-4)',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          paddingBottom: 'var(--space-6)',
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--color-primary)',
-              marginBottom: 'var(--space-2)',
-            }}
-          >
-            Cryptographic Audit Trail
-          </div>
-          <h1
-            style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize: 'var(--text-3xl)',
-              fontWeight: 400,
-              color: 'var(--color-text-primary)',
-              margin: '0 0 var(--space-2) 0',
-            }}
-          >
-            Audit Log & Independent Verifier
-          </h1>
-          <p
-            style={{
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-base)',
-              color: 'var(--color-text-secondary)',
-              maxWidth: '720px',
-              margin: 0,
-            }}
-          >
-            Every security event (commitments, model invocations, token lifecycle) is
-            appended to a SHA-256 hash-chained log signed with Ed25519. The independent
-            Verifier validates every link from genesis to HEAD.
-          </p>
-        </div>
+    <div style={{ paddingBottom: '6rem' }}>
+      <div className="container" style={{ paddingTop: '2.5rem' }}>
 
-        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-          <button
-            type="button"
-            onClick={fetchLogAndVerify}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-secondary)',
-              border: '1px solid var(--color-border-subtle)',
-              padding: 'var(--space-2) var(--space-3)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              cursor: 'pointer',
-            }}
-          >
-            <RefreshCwIcon size={14} />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleVerifyNow}
-            disabled={verifying}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              backgroundColor: 'var(--color-primary)',
-              color: 'var(--color-text-inverse)',
-              border: '1px solid var(--color-primary)',
-              padding: 'var(--space-2) var(--space-4)',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <ShieldCheckIcon size={14} />
-            <span>{verifying ? 'Verifying Chain...' : 'Verify Chain Now'}</span>
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div
-          style={{
-            padding: 'var(--space-4)',
-            backgroundColor: 'var(--color-danger-soft)',
-            border: '1px solid var(--color-danger)',
-            color: 'var(--color-danger)',
-            fontSize: 'var(--text-sm)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Verification Head Banner */}
-      <div
-        style={{
-          border: '1px solid var(--color-border-subtle)',
-          backgroundColor: 'var(--color-bg-surface)',
-          padding: 'var(--space-5)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 'var(--space-4)',
-          alignItems: 'center',
-        }}
-      >
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-text-muted)' }}>
-            CHAIN STATUS
-          </div>
-          <div style={{ marginTop: '4px' }}>
-            <StatusBadge status={verification?.ok ? 'verified' : 'failed'} />
-          </div>
-        </div>
-
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-text-muted)' }}>
-            VALIDATED ENTRIES / CHECKPOINTS
-          </div>
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-base)',
-              fontWeight: 700,
-              color: 'var(--color-text-primary)',
-              marginTop: '2px',
-            }}
-          >
-            {verification?.entries ?? '-'} entries · {verification?.checkpoints ?? 0} checkpoints
-          </div>
-        </div>
-
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-text-muted)' }}>
-            LATEST HEAD DIGEST
-          </div>
-          <div style={{ marginTop: '2px' }}>
-            {verification?.head ? (
-              <HashDisplay hash={verification.head.hash} />
-            ) : (
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>None</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Tamper Detection Analysis Section */}
-      <section
-        style={{
-          border: '1px solid var(--color-border-subtle)',
-          backgroundColor: 'var(--color-bg-surface)',
-          padding: 'var(--space-6)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-4)',
-        }}
-      >
+        {/* ── Header ───────────────────────────────────────────────────────── */}
         <div
           style={{
             display: 'flex',
@@ -259,356 +349,270 @@ export const AuditLogView: React.FC<AuditLogViewProps> = () => {
             alignItems: 'flex-start',
             flexWrap: 'wrap',
             gap: 'var(--space-4)',
+            marginBottom: 'var(--space-8)',
+            paddingBottom: 'var(--space-6)',
+            borderBottom: '1px solid var(--border-subtle)',
           }}
         >
           <div>
-            <div
+            <div className="section-overline">Cryptographic Audit Trail</div>
+            <h1
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                color: 'var(--color-primary)',
-                textTransform: 'uppercase',
-                fontWeight: 600,
+                fontFamily: 'var(--font-display)',
+                fontSize: 'var(--text-h1)',
+                fontWeight: 400,
+                color: 'var(--text-primary)',
+                margin: '0 0 var(--space-2) 0',
               }}
             >
-              Integrity Assurance
-            </div>
-            <h2
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-lg)',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                margin: '2px 0',
-              }}
-            >
-              Tamper Detection Capability
-            </h2>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-secondary)',
-                margin: 0,
-                maxWidth: '680px',
-              }}
-            >
-              Simulates intentional attacks against audit log integrity (modifying row data,
-              deleting intermediate entries, and truncating the log). Proves the verifier
-              mathematically flags all unauthorized edits.
+              Audit Log & Independent Verifier
+            </h1>
+            <p style={{ fontSize: 'var(--text-body)', color: 'var(--text-secondary)', maxWidth: '640px', margin: 0 }}>
+              Every security event is appended to a SHA-256 hash-chained log and Ed25519-signed at checkpoints.
+              The independent Verifier validates every link from genesis to HEAD.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleRunTamperTest}
-            disabled={tamperTesting}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              backgroundColor: 'var(--color-bg-base)',
-              border: '1px solid var(--color-primary)',
-              color: 'var(--color-primary)',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            {tamperTesting ? 'Running Integrity Test...' : 'Test Tamper Detection'}
-          </button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={fetchLogAndVerify}
+              disabled={loading}
+            >
+              <RefreshIcon /> Refresh
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleVerifyNow}
+              disabled={verifying}
+            >
+              <ShieldIcon /> {verifying ? 'Verifying…' : 'Verify Chain Now'}
+            </button>
+          </div>
         </div>
 
-        {tamperReport && (
-          <div style={{ marginTop: 'var(--space-2)' }}>
-            <table
+        {/* ── Error ────────────────────────────────────────────────────────── */}
+        {error && (
+          <div style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-3) var(--space-4)', background: 'var(--status-fail-bg)', border: '1px solid var(--status-fail-border)', borderRadius: 'var(--radius-sm)', color: 'var(--status-fail-text)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
+            {error}
+          </div>
+        )}
+
+        {/* ── Hash-chain block explorer strip ──────────────────────────────── */}
+        {(entries.length > 0 || verification) && (
+          <div style={{ marginBottom: 'var(--space-8)' }}>
+            <ChainStrip entries={entries} verification={verification} />
+          </div>
+        )}
+
+        {/* ── Tamper Detection ──────────────────────────────────────────────── */}
+        <div style={{ marginBottom: 'var(--space-8)' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 'var(--space-3)',
+              marginBottom: 'var(--space-4)',
+            }}
+          >
+            <div>
+              <div className="section-overline" style={{ marginBottom: 'var(--space-1)' }}>Tamper Detection Capability</div>
+              <h2
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: '1.5rem',
+                  fontWeight: 400,
+                  color: 'var(--text-primary)',
+                  margin: 0,
+                }}
+              >
+                In-Memory Tamper Demo
+              </h2>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleRunTamperTest}
+              disabled={tamperTesting}
+            >
+              {tamperTesting ? 'Running tests…' : 'Test Tamper Detection'}
+            </button>
+          </div>
+
+          {tamperReport ? (
+            <TamperTestMatrix tamperReport={tamperReport} />
+          ) : (
+            <div
               style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: 'var(--text-xs)',
-                fontFamily: 'var(--font-mono)',
+                padding: 'var(--space-7)',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                textAlign: 'center',
               }}
             >
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
+                Click "Test Tamper Detection" to run the 6-attack in-memory demo against a copy of the live log.
+              </p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
+                Attacks: modify entry · delete entry · reorder entries · forge checkpoint · truncate before checkpoint · truncate after checkpoint
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Audit log table ───────────────────────────────────────────────── */}
+        <div>
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '1.5rem',
+                fontWeight: 400,
+                color: 'var(--text-primary)',
+                margin: '0 0 var(--space-1) 0',
+              }}
+            >
+              Log Entries
+            </h2>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
+              {entries.length} entries · raw prompts and responses never appear (SI-08) · click a row to inspect payload
+            </p>
+          </div>
+
+          <div className="table-scroll-container">
+            <table>
               <thead>
-                <tr
-                  style={{
-                    backgroundColor: 'var(--color-bg-base)',
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                    color: 'var(--color-text-muted)',
-                    textAlign: 'left',
-                  }}
-                >
-                  <th style={{ padding: '8px' }}>Test Case</th>
-                  <th style={{ padding: '8px' }}>Description</th>
-                  <th style={{ padding: '8px' }}>Tamper Detected</th>
-                  <th style={{ padding: '8px' }}>Expectation</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Status</th>
+                <tr>
+                  <th style={{ whiteSpace: 'nowrap' }}>Seq</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Time</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Actor</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Event</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Hash (short)</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Prev (short)</th>
                 </tr>
               </thead>
               <tbody>
-                {tamperReport.cases.map((c) => (
-                  <tr
-                    key={c.id}
-                    style={{
-                      borderBottom: '1px solid var(--color-border-subtle)',
-                      backgroundColor: c.limitation ? 'var(--color-bg-hover)' : 'transparent',
-                    }}
-                  >
-                    <td style={{ padding: '8px', fontWeight: 600 }}>{c.id}</td>
-                    <td style={{ padding: '8px', fontFamily: 'var(--font-sans)' }}>
-                      <div>{c.description}</div>
-                      {c.limitation && (
-                        <div
-                          style={{
-                            fontSize: '11px',
-                            color: 'var(--color-text-muted)',
-                            marginTop: '2px',
-                            fontFamily: 'var(--font-mono)',
-                          }}
-                        >
-                          * Limitation note: Without external witness anchors, tail truncation
-                          is indistinguishable from earlier valid history.
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '8px' }}>
-                      <span
-                        style={{
-                          color: c.detected ? 'var(--color-danger)' : 'var(--color-primary)',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {c.detected ? 'DETECTED' : 'NOT DETECTED'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '8px' }}>
-                      {c.expected_detection ? 'Expects Detection' : 'Expected Baseline'}
-                    </td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>
-                      <StatusBadge status={c.passed ? 'verified' : 'failed'} />
+                {loading && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-8)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
+                      Loading audit log…
                     </td>
                   </tr>
-                ))}
+                )}
+                {!loading && entries.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-8)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
+                      No audit entries yet.
+                    </td>
+                  </tr>
+                )}
+                {pagedEntries.map(entry => {
+                  const ac = actorColor(entry.actor);
+                  const isSelected = selectedEntry?.seq === entry.seq;
+                  return (
+                    <React.Fragment key={entry.seq}>
+                      <tr
+                        onClick={() => setSelectedEntry(isSelected ? null : entry)}
+                        style={{ cursor: 'pointer', background: isSelected ? 'rgba(46,74,54,0.05)' : undefined }}
+                      >
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+                          #{entry.seq}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                          {new Date(entry.ts).toLocaleString()}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '2px 7px',
+                              borderRadius: 'var(--radius-sm)',
+                              background: ac.bg,
+                              color: ac.color,
+                              border: `1px solid ${ac.color}30`,
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: 'var(--text-xs)',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {entry.actor}
+                          </span>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                          {entry.event}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--accent-primary)' }}>
+                          {entry.hash.slice(0, 12)}…
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                          {entry.prev.slice(0, 12)}…
+                        </td>
+                      </tr>
+                      {/* Inline payload */}
+                      {isSelected && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: 0 }}>
+                            <div
+                              style={{
+                                padding: 'var(--space-4) var(--space-5)',
+                                background: 'var(--bg-subtle)',
+                                borderTop: '1px solid var(--border-subtle)',
+                                borderBottom: '1px solid var(--border-subtle)',
+                              }}
+                            >
+                              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', textTransform: 'uppercase' }}>
+                                Entry Data (digests only — SI-08)
+                              </div>
+                              <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', overflow: 'auto', maxHeight: 200, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                {JSON.stringify(entry.data, null, 2)}
+                              </pre>
+                              <div style={{ marginTop: 'var(--space-3)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                                Full hash: <span style={{ color: 'var(--accent-primary)', userSelect: 'all' }}>{entry.hash}</span>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-        )}
-      </section>
 
-      {/* Audit Log Entries Table */}
-      <div
-        style={{
-          border: '1px solid var(--color-border-subtle)',
-          backgroundColor: 'var(--color-bg-surface)',
-          overflowX: 'auto',
-        }}
-      >
-        <div
-          style={{
-            padding: 'var(--space-3) var(--space-4)',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-xs)',
-            textTransform: 'uppercase',
-            color: 'var(--color-text-muted)',
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}
-        >
-          <span>Audit Log Sequence (Most Recent {entries.length} Events)</span>
-          <span>Hash Chained: SHA-256</span>
-        </div>
-
-        {loading && entries.length === 0 ? (
-          <div
-            style={{
-              padding: 'var(--space-8)',
-              textAlign: 'center',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-sm)',
-              color: 'var(--color-text-muted)',
-            }}
-          >
-            Loading audit records...
-          </div>
-        ) : entries.length === 0 ? (
-          <div
-            style={{
-              padding: 'var(--space-8)',
-              textAlign: 'center',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-sm)',
-              color: 'var(--color-text-muted)',
-            }}
-          >
-            No audit log entries recorded yet.
-          </div>
-        ) : (
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 'var(--text-xs)',
-              fontFamily: 'var(--font-mono)',
-              textAlign: 'left',
-            }}
-          >
-            <thead>
-              <tr
-                style={{
-                  backgroundColor: 'var(--color-bg-base)',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                <th style={{ padding: '8px 12px' }}>Seq</th>
-                <th style={{ padding: '8px 12px' }}>Timestamp</th>
-                <th style={{ padding: '8px 12px' }}>Actor</th>
-                <th style={{ padding: '8px 12px' }}>Event</th>
-                <th style={{ padding: '8px 12px' }}>Hash</th>
-                <th style={{ padding: '8px 12px' }}>Prev Hash</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right' }}>Payload</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => (
-                <tr
-                  key={entry.seq}
-                  style={{
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                  }}
+            {/* Pagination */}
+            {totalLogPages > 1 && (
+              <div className="pagination">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={logPage === 0}
+                  onClick={() => setLogPage(p => Math.max(0, p - 1))}
                 >
-                  <td style={{ padding: '8px 12px', fontWeight: 700 }}>#{entry.seq}</td>
-                  <td style={{ padding: '8px 12px', color: 'var(--color-text-muted)' }}>
-                    {entry.ts ? new Date(entry.ts).toLocaleTimeString() : '-'}
-                  </td>
-                  <td style={{ padding: '8px 12px' }}>
-                    <span
-                      style={{
-                        padding: '2px 6px',
-                        backgroundColor: 'var(--color-bg-hover)',
-                        border: '1px solid var(--color-border-subtle)',
-                      }}
-                    >
-                      {entry.actor}
-                    </span>
-                  </td>
-                  <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                    {entry.event}
-                  </td>
-                  <td style={{ padding: '8px 12px' }}>
-                    <HashDisplay hash={entry.hash} truncateLength={8} />
-                  </td>
-                  <td style={{ padding: '8px 12px' }}>
-                    <HashDisplay hash={entry.prev} truncateLength={8} />
-                  </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedEntry(entry)}
-                      style={{
-                        background: 'none',
-                        border: '1px solid var(--color-border-subtle)',
-                        padding: '2px 6px',
-                        fontSize: '11px',
-                        fontFamily: 'var(--font-mono)',
-                        cursor: 'pointer',
-                        color: 'var(--color-primary)',
-                      }}
-                    >
-                      Inspect
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Entry Payload Modal */}
-      <Modal
-        isOpen={!!selectedEntry}
-        onClose={() => setSelectedEntry(null)}
-        title={`Audit Entry #${selectedEntry?.seq}: ${selectedEntry?.event}`}
-      >
-        {selectedEntry && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 'var(--space-2)',
-                backgroundColor: 'var(--color-bg-base)',
-                padding: 'var(--space-3)',
-                border: '1px solid var(--color-border-subtle)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-              }}
-            >
-              <div>
-                <span style={{ color: 'var(--color-text-muted)' }}>Actor: </span>
-                <span>{selectedEntry.actor}</span>
+                  Previous
+                </button>
+                <div className="pagination__info">
+                  Page {logPage + 1} of {totalLogPages} · {entries.length} total entries
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={logPage >= totalLogPages - 1}
+                  onClick={() => setLogPage(p => Math.min(totalLogPages - 1, p + 1))}
+                >
+                  Next
+                </button>
               </div>
-              <div>
-                <span style={{ color: 'var(--color-text-muted)' }}>Timestamp: </span>
-                <span>{selectedEntry.ts}</span>
-              </div>
-              <div style={{ gridColumn: 'span 2' }}>
-                <span style={{ color: 'var(--color-text-muted)' }}>Run ID: </span>
-                <span>{selectedEntry.run_id || 'None (System event)'}</span>
-              </div>
-            </div>
-
-            <div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                PAYLOAD DATA (SI-08: REDACTED PRE-CONCLUSION)
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: 'var(--space-3)',
-                  backgroundColor: 'var(--color-bg-base)',
-                  border: '1px solid var(--color-border-subtle)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  maxHeight: '260px',
-                  overflowY: 'auto',
-                }}
-              >
-                {JSON.stringify(selectedEntry.data, null, 2)}
-              </pre>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setSelectedEntry(null)}
-                style={{
-                  padding: 'var(--space-2) var(--space-4)',
-                  backgroundColor: 'var(--color-primary)',
-                  border: '1px solid var(--color-primary)',
-                  color: 'var(--color-text-inverse)',
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Close
-              </button>
-            </div>
+            )}
           </div>
-        )}
-      </Modal>
+        </div>
+      </div>
     </div>
   );
 };

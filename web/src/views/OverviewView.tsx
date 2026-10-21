@@ -1,16 +1,238 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '../api/client';
 import type {
   HealthResponse,
   VerifyResponse,
   BreakitReportResponse,
   TimingReportResponse,
+  RunListItem,
   ViewType,
 } from '../types/api';
 import { ArchitectureDiagram } from '../components/diagram/ArchitectureDiagram';
-import { StatusBadge } from '../components/common/StatusBadge';
-import { HashDisplay } from '../components/common/HashDisplay';
-import { ShieldCheckIcon, CheckCircleIcon, ArrowRightIcon } from '../components/common/Icons';
+
+// ── Inline SVG icons for commit-reveal phases ────────────────────────────────
+
+const PadlockIcon = () => (
+  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <rect x="7" y="16" width="22" height="17" rx="3" fill="var(--accent-red-bg)" stroke="var(--accent-red-team)" strokeWidth="1.5" />
+    <path d="M12 16v-5a6 6 0 0 1 12 0v5" stroke="var(--accent-red-team)" strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="18" cy="24" r="3" fill="var(--accent-red-team)" />
+    <line x1="18" y1="27" x2="18" y2="30" stroke="var(--accent-red-team)" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const ShieldMediationIcon = () => (
+  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <path d="M18 4L6 9v9c0 7.18 5.14 13.88 12 15.48C24.86 31.88 30 25.18 30 18V9L18 4z" fill="var(--accent-gateway-bg)" stroke="var(--accent-gateway)" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M13 18l3.5 3.5L24 14" stroke="var(--accent-gateway)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const VerifiedHashIcon = () => (
+  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <rect x="6" y="8" width="24" height="20" rx="3" fill="var(--status-pass-bg)" stroke="var(--status-pass-text)" strokeWidth="1.5" />
+    <line x1="11" y1="14" x2="25" y2="14" stroke="var(--status-pass-text)" strokeWidth="1.25" strokeLinecap="round" />
+    <line x1="11" y1="18" x2="20" y2="18" stroke="var(--status-pass-text)" strokeWidth="1.25" strokeLinecap="round" />
+    <circle cx="26" cy="26" r="6" fill="var(--status-pass-bg)" stroke="var(--status-pass-text)" strokeWidth="1.5" />
+    <path d="M23 26l2 2 4-4" stroke="var(--status-pass-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ArrowRight = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+// ── "10 Seconds" summary strip ───────────────────────────────────────────────
+
+const TenSecondStrip: React.FC = () => (
+  <div
+    style={{
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 'var(--space-2)',
+      marginBottom: 'var(--space-5)',
+    }}
+  >
+    {[
+      { num: '1', label: 'Red Team Attacks', color: 'var(--accent-red-team)', bg: 'var(--accent-red-bg)' },
+      { num: '2', label: 'Gateway Mediates & Isolates', color: 'var(--accent-gateway)', bg: 'var(--accent-gateway-bg)' },
+      { num: '3', label: 'SHA-256 Ledger Verifies', color: 'var(--status-pass-text)', bg: 'var(--status-pass-bg)' },
+    ].map(({ num, label, color, bg }) => (
+      <span
+        key={num}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          padding: '6px 12px',
+          borderRadius: 'var(--radius-pill)',
+          background: bg,
+          border: `1px solid ${color}`,
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
+          color,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: '50%',
+            background: color,
+            color: '#fff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '0.65rem',
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          {num}
+        </span>
+        {label}
+      </span>
+    ))}
+  </div>
+);
+
+// ── KPI Card ─────────────────────────────────────────────────────────────────
+
+interface KpiProps {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  accentColor?: string;
+}
+
+const KpiCard: React.FC<KpiProps> = ({ label, value, sub, accentColor }) => (
+  <div
+    className="kpi-card"
+    style={{
+      borderLeft: accentColor ? `3px solid ${accentColor}` : undefined,
+    }}
+  >
+    <div className="kpi-card__label">{label}</div>
+    <div className="kpi-card__value">{value}</div>
+    {sub && <div className="kpi-card__sub">{sub}</div>}
+  </div>
+);
+
+// ── Commit-Reveal Pipeline Step ───────────────────────────────────────────────
+
+interface PipelineStepProps {
+  icon: React.ReactNode;
+  phase: string;
+  title: string;
+  description: string;
+  accentColor: string;
+}
+
+const PipelineStep: React.FC<PipelineStepProps> = ({ icon, phase, title, description, accentColor }) => (
+  <div
+    className="pipeline-step"
+    style={{ borderTop: `3px solid ${accentColor}` }}
+  >
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+      {icon}
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 'var(--text-xs)',
+          fontWeight: 700,
+          color: accentColor,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        {phase}
+      </span>
+    </div>
+    <div style={{ fontWeight: 600, fontSize: 'var(--text-h3)', color: 'var(--text-primary)' }}>{title}</div>
+    <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+      {description}
+    </p>
+  </div>
+);
+
+// ── Feature card ─────────────────────────────────────────────────────────────
+
+interface FeatureCardProps {
+  overline: string;
+  title: string;
+  description: string;
+  linkLabel: string;
+  onLink: () => void;
+  color: string;
+  indicator?: React.ReactNode;
+}
+
+const FeatureCard: React.FC<FeatureCardProps> = ({ overline, title, description, linkLabel, onLink, color, indicator }) => (
+  <div
+    className="card"
+    style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 'var(--space-4)',
+      justifyContent: 'space-between',
+    }}
+  >
+    <div>
+      {indicator && <div style={{ marginBottom: 'var(--space-3)' }}>{indicator}</div>}
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 'var(--text-xs)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color,
+          marginBottom: 'var(--space-2)',
+          fontWeight: 600,
+        }}
+      >
+        {overline}
+      </div>
+      <h3
+        style={{
+          fontSize: 'var(--text-h3)',
+          fontWeight: 600,
+          color: 'var(--text-primary)',
+          margin: '0 0 var(--space-2) 0',
+        }}
+      >
+        {title}
+      </h3>
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+        {description}
+      </p>
+    </div>
+    <button
+      type="button"
+      onClick={onLink}
+      style={{
+        alignSelf: 'flex-start',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        border: 'none',
+        background: 'none',
+        padding: 0,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 600,
+        color,
+        cursor: 'pointer',
+      }}
+    >
+      {linkLabel} <ArrowRight />
+    </button>
+  </div>
+);
+
+// ── Main view ─────────────────────────────────────────────────────────────────
 
 interface OverviewViewProps {
   onNavigate: (view: ViewType) => void;
@@ -21,793 +243,534 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate }) => {
   const [verification, setVerification] = useState<VerifyResponse | null>(null);
   const [breakit, setBreakit] = useState<BreakitReportResponse | null>(null);
   const [timing, setTiming] = useState<TimingReportResponse | null>(null);
+  const [latestRun, setLatestRun] = useState<RunListItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadData() {
-      try {
-        setLoading(true);
-        const [h, v, b, t] = await Promise.allSettled([
-          apiClient.getHealth(),
-          apiClient.verifyAuditLog(),
-          apiClient.getBreakitReport(),
-          apiClient.getTimingReport(),
-        ]);
-
-        if (!mounted) return;
-
-        if (h.status === 'fulfilled') setHealth(h.value);
-        if (v.status === 'fulfilled') setVerification(v.value);
-        if (b.status === 'fulfilled') setBreakit(b.value);
-        if (t.status === 'fulfilled') setTiming(t.value);
-      } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load platform data');
-        }
-      } finally {
-        if (mounted) setLoading(false);
+  const loadData = useCallback(async () => {
+    try {
+      const [h, v, b, t, r] = await Promise.allSettled([
+        apiClient.getHealth(),
+        apiClient.verifyAuditLog(),
+        apiClient.getBreakitReport(),
+        apiClient.getTimingReport(),
+        apiClient.listRuns(),
+      ]);
+      if (h.status === 'fulfilled') setHealth(h.value);
+      if (v.status === 'fulfilled') setVerification(v.value);
+      if (b.status === 'fulfilled') setBreakit(b.value);
+      if (t.status === 'fulfilled') setTiming(t.value);
+      if (r.status === 'fulfilled') {
+        const runs = r.value.runs || [];
+        setLatestRun(runs[0] ?? null);
       }
+    } finally {
+      setLoading(false);
     }
-
-    loadData();
-    const interval = setInterval(loadData, 10000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
   }, []);
 
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 10000);
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  // Derived KPI values
+  const healthOk = health?.status === 'ok';
+  const auditOk = verification?.ok ?? null;
+  const headHash = verification?.head?.hash;
+  const probesPassed = breakit?.summary?.passed ?? null;
+  const probesTotal = breakit?.summary?.total ?? null;
+  const isolatedVerdict = timing?.modes?.isolated?.verdict;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-12)' }}>
-      {error && (
-        <div
-          style={{
-            padding: 'var(--space-3) var(--space-4)',
-            backgroundColor: 'var(--color-danger-soft)',
-            border: '1px solid var(--color-danger)',
-            color: 'var(--color-danger)',
-            fontSize: 'var(--text-xs)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          {error}
-        </div>
-      )}
-      {/* Hero Section */}
-      <section
-        style={{
-          borderBottom: '1px solid var(--color-border-subtle)',
-          paddingBottom: 'var(--space-12)',
-        }}
-      >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: 'var(--space-8)',
-            alignItems: 'start',
-          }}
-        >
-          {/* Left Column: Mission & Controls */}
-          <div>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: 'var(--color-primary)',
-                marginBottom: 'var(--space-3)',
-                padding: '2px 8px',
-                backgroundColor: 'var(--color-primary-soft)',
-                border: '1px solid var(--color-primary)',
-              }}
-            >
-              <ShieldCheckIcon size={14} />
-              Formal Adversarial Safety Infrastructure
+    <div style={{ paddingBottom: '6rem' }}>
+
+      {/* ─── HERO SECTION ─────────────────────────────────────────────────── */}
+      <section style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '4rem' }}>
+        <div className="container" style={{ paddingTop: '3rem' }}>
+          <div className="hero-grid">
+
+            {/* Left column */}
+            <div>
+              {/* Category badge */}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginBottom: 'var(--space-4)',
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  border: '1px solid var(--accent-primary)',
+                  background: 'rgba(46,74,54,0.06)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 600,
+                  color: 'var(--accent-primary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M8 2L14 5v6l-6 3L2 11V5L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                </svg>
+                Adversarial AI Safety Platform
+              </div>
+
+              {/* Headline */}
+              <h1
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 'var(--text-h1)',
+                  fontWeight: 400,
+                  lineHeight: 1.08,
+                  letterSpacing: '-0.02em',
+                  color: 'var(--text-primary)',
+                  margin: '0 0 var(--space-5) 0',
+                }}
+              >
+                A rigorous, verifiable crucible for AI red teaming.
+              </h1>
+
+              {/* 10-second strip */}
+              <TenSecondStrip />
+
+              {/* Subtext */}
+              <p
+                style={{
+                  fontSize: 'var(--text-body)',
+                  color: 'var(--text-secondary)',
+                  lineHeight: 1.65,
+                  maxWidth: '56ch',
+                  marginBottom: 'var(--space-7)',
+                }}
+              >
+                Bayora runs Red Team attacker, Blue Team defender, and a client LLM
+                concurrently in strict Docker network isolation. A SHA-256 hash-chain
+                audit log and Ed25519 signed checkpoints guarantee non-repudiation.
+              </p>
+
+              {/* CTA buttons */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginBottom: 'var(--space-9)' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => onNavigate('runs')}
+                >
+                  View Evaluation Runs <ArrowRight />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onNavigate('audit')}
+                >
+                  Verify Audit Log
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => onNavigate('breakit')}
+                >
+                  Isolation Probes
+                </button>
+              </div>
+
+              {/* KPI metrics grid */}
+              <div className="kpi-grid">
+                <KpiCard
+                  label="Services Status"
+                  value={loading ? '…' : healthOk ? 'Healthy' : 'Degraded'}
+                  sub={healthOk ? 'All subsystems operational' : 'Check logs'}
+                  accentColor={healthOk ? 'var(--status-pass-text)' : 'var(--status-fail-text)'}
+                />
+                <KpiCard
+                  label="Audit Chain Head"
+                  value={loading ? '…' : verification?.entries ?? '—'}
+                  sub={headHash ? `#${headHash.slice(0, 8)}…` : 'Pending'}
+                  accentColor="var(--accent-primary)"
+                />
+                <KpiCard
+                  label="Isolation Probes"
+                  value={loading ? '…' : probesPassed !== null ? `${probesPassed}/${probesTotal}` : '—'}
+                  sub={probesPassed === probesTotal && probesTotal !== null ? 'All passed' : 'Some failed'}
+                  accentColor={probesPassed === probesTotal && probesTotal !== null ? 'var(--status-pass-text)' : 'var(--status-warn-text)'}
+                />
+                <KpiCard
+                  label="Timing Side-Channel"
+                  value={loading ? '…' : isolatedVerdict === 'no_leak_detected' ? 'Defended' : isolatedVerdict === 'leak_detected' ? 'Leak' : '—'}
+                  sub={isolatedVerdict === 'no_leak_detected' ? 'p ≥ 0.01 (isolated)' : 'See timing view'}
+                  accentColor={isolatedVerdict === 'no_leak_detected' ? 'var(--status-pass-text)' : 'var(--status-warn-text)'}
+                />
+              </div>
             </div>
 
-            <h1
-              style={{
-                fontFamily: 'var(--font-serif)',
-                fontSize: 'clamp(2.5rem, 4vw, 3.75rem)',
-                fontWeight: 400,
-                lineHeight: 1.1,
-                color: 'var(--color-text-primary)',
-                margin: '0 0 var(--space-4) 0',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              A rigorous, verifiable crucible for AI red teaming.
-            </h1>
-
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-lg)',
-                lineHeight: 1.6,
-                color: 'var(--color-text-secondary)',
-                margin: '0 0 var(--space-6) 0',
-                maxWidth: '580px',
-              }}
-            >
-              Bayora runs red team attacker, blue team defender, and client LLM
-              concurrently in an isolated, multi-container environment. Strict network
-              partitions, non-privileged runtimes, and a cryptographic SHA-256 audit log
-              guarantee non-repudiation.
-            </p>
-
-            {/* Primary Action Buttons */}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 'var(--space-3)',
-                marginBottom: 'var(--space-8)',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => onNavigate('runs')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'var(--color-text-inverse)',
-                  border: '1px solid var(--color-primary)',
-                  padding: 'var(--space-3) var(--space-6)',
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <span>View Evaluation Runs</span>
-                <ArrowRightIcon size={16} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('audit')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  backgroundColor: 'var(--color-bg-surface)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border-subtle)',
-                  padding: 'var(--space-3) var(--space-6)',
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <span>Verify Audit Log</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('breakit')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  backgroundColor: 'transparent',
-                  color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border-subtle)',
-                  padding: 'var(--space-3) var(--space-4)',
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span>Isolation Probes</span>
-              </button>
+            {/* Right column: Architecture diagram */}
+            <div>
+              <div style={{ marginBottom: 'var(--space-3)' }}>
+                <div className="section-overline">Container Topology & Request Flow</div>
+                <h2
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: '1.5rem',
+                    fontWeight: 400,
+                    color: 'var(--text-primary)',
+                    margin: '0 0 var(--space-2) 0',
+                  }}
+                >
+                  Enforced Security Boundaries
+                </h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', margin: 0 }}>
+                  Tenants reside on isolated internal bridges. Every interaction passes through the hardened Gateway.
+                </p>
+              </div>
+              <ArchitectureDiagram />
             </div>
           </div>
+        </div>
+      </section>
 
-          {/* Right Column: Live Status Ledger */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-4)',
-            }}
-          >
+      {/* ─── LATEST RUN BANNER ─────────────────────────────────────────────── */}
+      {latestRun && (
+        <section style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-subtle)', padding: '1.25rem 0' }}>
+          <div className="container">
             <div
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                color: 'var(--color-text-muted)',
-                borderBottom: '1px solid var(--color-border-subtle)',
-                paddingBottom: 'var(--space-2)',
                 display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 'var(--space-4)',
                 justifyContent: 'space-between',
               }}
             >
-              <span>System Verification Ledger</span>
-              <span>{loading ? 'Refreshing...' : 'Live'}</span>
-            </div>
-
-            {/* Gateway Health */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                Gateway & TCB
-              </span>
-              <StatusBadge status={health?.status === 'ok' ? 'ok' : 'pending'} />
-            </div>
-
-            {/* Hash Chained Log */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                  Audit Trail Integrity
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Latest Run
                 </span>
-                <StatusBadge status={verification?.ok ? 'verified' : 'failed'} />
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {latestRun.name || latestRun.run_id.slice(0, 8)}
+                </span>
+                <RunStatePill state={latestRun.state} />
               </div>
-              {verification?.head && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: '2px' }}>
-                  <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>
-                    HEAD ({verification.entries} entries):
-                  </span>
-                  <HashDisplay hash={verification.head.hash} truncateLength={10} />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => onNavigate('runs')}
+              >
+                All runs <ArrowRight />
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── SEALED COMMIT-REVEAL PROTOCOL ────────────────────────────────── */}
+      <section className="section-sep">
+        <div className="container">
+          <div style={{ maxWidth: '720px', marginBottom: 'var(--space-8)' }}>
+            <div className="section-overline">Adversarial Protocol Integrity</div>
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 'var(--text-h1)',
+                fontWeight: 400,
+                color: 'var(--text-primary)',
+                margin: '0 0 var(--space-3) 0',
+              }}
+            >
+              Sealed Commit-Reveal Protocol
+            </h2>
+            <p style={{ fontSize: 'var(--text-body)', color: 'var(--text-secondary)', lineHeight: 1.65, margin: 0 }}>
+              Neither party can adapt mid-run or modify their strategy after seeing the opponent's moves.
+              Cryptographic hashes bind the attack corpus and defense bundle before evaluation starts.
+            </p>
+          </div>
+
+          <div className="pipeline-steps">
+            <PipelineStep
+              icon={<PadlockIcon />}
+              phase="Phase 01"
+              title="Sealed Commit"
+              description="Red commits SHA-256 digests of all test prompts. Blue commits the defense rule bundle digest. Both digests are immutably logged before execution begins."
+              accentColor="var(--accent-red-team)"
+            />
+            {/* Desktop arrow connector (hidden on mobile) */}
+            <PipelineStep
+              icon={<ShieldMediationIcon />}
+              phase="Phase 02"
+              title="Mediated Execution"
+              description="Prompts execute in random order through the Gateway. Audit events record digests only (SI-08). Raw prompt and response texts remain sealed to prevent mid-run leakage."
+              accentColor="var(--accent-gateway)"
+            />
+            <PipelineStep
+              icon={<VerifiedHashIcon />}
+              phase="Phase 03"
+              title="Verified Revelation"
+              description="Upon conclusion, the ASR is computed. The independent Verifier walks the entire SHA-256 chain and checks Ed25519 signatures, proving historical non-tampering."
+              accentColor="var(--status-pass-text)"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ─── FEATURE DEEP-DIVE CARDS ──────────────────────────────────────── */}
+      <section style={{ paddingTop: '4rem', paddingBottom: '4rem', background: 'var(--bg-subtle)' }}>
+        <div className="container">
+          <div style={{ maxWidth: '640px', marginBottom: 'var(--space-8)' }}>
+            <div className="section-overline">Security Infrastructure</div>
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 'var(--text-h1)',
+                fontWeight: 400,
+                color: 'var(--text-primary)',
+                margin: '0 0 var(--space-3) 0',
+              }}
+            >
+              Three pillars of verified isolation
+            </h2>
+          </div>
+
+          <div className="feature-grid">
+            <FeatureCard
+              overline="Proven Boundaries"
+              title="Active Isolation Probes"
+              description="Automated negative security tests run from inside tenant containers: cross-tenant routing, raw Docker socket access, filesystem writes, and privilege escalation — every attempt fails as designed."
+              linkLabel="Inspect Isolation Probes"
+              onLink={() => onNavigate('breakit')}
+              color="var(--accent-primary)"
+              indicator={
+                breakit ? (
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--status-pass-text)' }}>
+                      {breakit.summary.passed}/{breakit.summary.total} passed
+                    </span>
+                    {breakit.summary.failed === 0 ? (
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--status-pass-text)', animation: 'pulse-dot 2s ease-in-out infinite', display: 'inline-block' }} />
+                    ) : (
+                      <span style={{ color: 'var(--status-fail-text)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 700 }}>
+                        {breakit.summary.failed} failed
+                      </span>
+                    )}
+                  </div>
+                ) : null
+              }
+            />
+            <FeatureCard
+              overline="Microarchitectural Safety"
+              title="Timing Side-Channel Analysis"
+              description="Empirical timing distributions measure KV-cache cross-tenant leakage. When isolated cache mode is active, prefix cache state is strictly partitioned, yielding indistinguishable latency distributions."
+              linkLabel="View Latency Distributions"
+              onLink={() => onNavigate('timing')}
+              color="var(--accent-gateway)"
+              indicator={
+                timing?.modes?.isolated ? (
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 600, color: timing.modes.isolated.verdict === 'no_leak_detected' ? 'var(--status-pass-text)' : 'var(--status-warn-text)' }}>
+                    Isolated: {timing.modes.isolated.verdict === 'no_leak_detected' ? 'No leak detected' : 'Leak detected'} (p={timing.modes.isolated.p_value?.toFixed(4)})
+                  </div>
+                ) : null
+              }
+            />
+            <FeatureCard
+              overline="Cryptographic Integrity"
+              title="Tamper-Evident Audit Trail"
+              description="Every token issuance, commitment, model call, and bundle registration is hashed and chained. Tested against simulated tampering: row modifications, deletions, and truncations break verification."
+              linkLabel="Explore Audit Log"
+              onLink={() => onNavigate('audit')}
+              color="var(--accent-primary)"
+              indicator={
+                verification ? (
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 700, color: auditOk ? 'var(--status-pass-text)' : 'var(--status-fail-text)' }}>
+                      {auditOk ? 'Chain verified' : 'Verification failed'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                      {verification.entries} entries, {verification.checkpoints} checkpoints
+                    </span>
+                  </div>
+                ) : null
+              }
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ─── DARK HASH-CHAIN BLOCK STRIP ──────────────────────────────────── */}
+      {verification && headHash && (
+        <section
+          style={{
+            background: 'var(--bg-inverse)',
+            color: 'var(--text-on-inverse)',
+            paddingTop: '3rem',
+            paddingBottom: '3rem',
+          }}
+        >
+          <div className="container">
+            <div style={{ marginBottom: 'var(--space-5)' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--text-xs)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  color: 'var(--text-muted-on-inverse)',
+                  marginBottom: 'var(--space-2)',
+                }}
+              >
+                Cryptographic Audit Chain — Live Head
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: '1.6rem',
+                    fontWeight: 400,
+                    color: 'var(--text-on-inverse)',
+                  }}
+                >
+                  {verification.ok ? 'Chain Verified' : 'Verification Error'}
+                </span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: verification.ok ? 'rgba(134,239,172,0.15)' : 'rgba(252,165,165,0.15)',
+                    border: `1px solid ${verification.ok ? 'var(--status-pass-border)' : 'var(--status-fail-border)'}`,
+                    color: verification.ok ? 'var(--status-pass-border)' : 'var(--status-fail-border)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {verification.entries} entries · {verification.checkpoints} checkpoints
+                </span>
+              </div>
+            </div>
+
+            {/* Block strip */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0,
+                overflowX: 'auto',
+                paddingBottom: 'var(--space-3)',
+              }}
+            >
+              {/* Genesis block */}
+              <div
+                style={{
+                  flexShrink: 0,
+                  background: 'var(--bg-inverse-elevated)',
+                  border: '1px solid var(--border-inverse)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  minWidth: 140,
+                }}
+              >
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted-on-inverse)', marginBottom: 2, textTransform: 'uppercase' }}>Genesis</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-on-inverse)', fontWeight: 600 }}>Seq #0</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text-muted-on-inverse)' }}>prev: 0000…0000</div>
+              </div>
+              <span style={{ color: 'var(--text-muted-on-inverse)', padding: '0 var(--space-2)', fontSize: 20, flexShrink: 0 }}>→</span>
+              <div
+                style={{
+                  flexShrink: 0,
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.65rem',
+                  color: 'var(--text-muted-on-inverse)',
+                  padding: '0 var(--space-2)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {verification.entries - 1} intermediate entries
+              </div>
+              <span style={{ color: 'var(--text-muted-on-inverse)', padding: '0 var(--space-2)', fontSize: 20, flexShrink: 0 }}>→</span>
+              {/* Head block */}
+              <div
+                style={{
+                  flexShrink: 0,
+                  background: verification.ok ? 'rgba(134,239,172,0.1)' : 'rgba(252,165,165,0.1)',
+                  border: `1px solid ${verification.ok ? 'rgba(134,239,172,0.35)' : 'rgba(252,165,165,0.35)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  minWidth: 200,
+                }}
+              >
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: verification.ok ? 'var(--status-pass-border)' : 'var(--status-fail-border)', marginBottom: 2, textTransform: 'uppercase', fontWeight: 600 }}>
+                  HEAD — #{verification.head?.seq}
                 </div>
-              )}
-            </div>
-
-            {/* Isolation Probes */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                Container Isolation Probes
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: breakit?.summary?.failed === 0 ? 'var(--color-primary)' : 'var(--color-danger)',
-                  fontWeight: 600,
-                }}
-              >
-                {breakit
-                  ? `${breakit.summary.passed}/${breakit.summary.total} Verified`
-                  : 'Checking...'}
-              </span>
-            </div>
-
-            {/* Side-Channel Leakage */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                Side-Channel (Cache Leakage)
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: timing?.modes?.isolated?.verdict === 'no_leak_detected'
-                    ? 'var(--color-primary)'
-                    : 'var(--color-warning)',
-                  fontWeight: 600,
-                }}
-              >
-                {timing?.modes?.isolated?.verdict === 'no_leak_detected'
-                  ? 'Defended (p >= 0.01)'
-                  : timing?.verdict || 'Inspecting...'}
-              </span>
-            </div>
-
-            {/* Hardening Checklist */}
-            <div
-              style={{
-                marginTop: 'var(--space-2)',
-                paddingTop: 'var(--space-3)',
-                borderTop: '1px solid var(--color-border-subtle)',
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 'var(--space-2)',
-                fontSize: 'var(--text-xs)',
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <CheckCircleIcon size={12} color="var(--color-primary)" />
-                <span>cap_drop: [ALL]</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <CheckCircleIcon size={12} color="var(--color-primary)" />
-                <span>read_only: true</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <CheckCircleIcon size={12} color="var(--color-primary)" />
-                <span>internal: true bridges</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <CheckCircleIcon size={12} color="var(--color-primary)" />
-                <span>unprivileged (10001)</span>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.72rem',
+                    color: 'var(--text-on-inverse)',
+                    fontWeight: 600,
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {headHash.slice(0, 24)}…
+                </div>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.68rem',
+                    color: 'var(--text-muted-on-inverse)',
+                    marginTop: 2,
+                  }}
+                >
+                  {verification.ok ? 'Ed25519 sig verified' : 'Verification errors'}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* Interactive Topology Section */}
-      <section>
-        <div style={{ marginBottom: 'var(--space-6)' }}>
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--color-primary)',
-              marginBottom: 'var(--space-2)',
-            }}
-          >
-            Container Topology & Request Flow
-          </div>
-          <h2
-            style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize: 'var(--text-2xl)',
-              fontWeight: 400,
-              color: 'var(--color-text-primary)',
-              margin: '0 0 var(--space-2) 0',
-            }}
-          >
-            Enforced Security Boundaries
-          </h2>
-          <p
-            style={{
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-base)',
-              color: 'var(--color-text-secondary)',
-              maxWidth: '720px',
-              margin: 0,
-            }}
-          >
-            Tenants reside on isolated internal bridges with zero egress to the internet,
-            the audit log, or directly to each other. Every interaction passes through the
-            hardened Gateway mediation barrier.
-          </p>
-        </div>
-
-        <ArchitectureDiagram />
-      </section>
-
-      {/* Protocol Walkthrough: Commit-Reveal Evaluation */}
-      <section
-        style={{
-          borderTop: '1px solid var(--color-border-subtle)',
-          paddingTop: 'var(--space-12)',
-        }}
-      >
-        <div style={{ marginBottom: 'var(--space-8)' }}>
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'var(--text-xs)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--color-primary)',
-              marginBottom: 'var(--space-2)',
-            }}
-          >
-            Adversarial Protocol Integrity
-          </div>
-          <h2
-            style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize: 'var(--text-2xl)',
-              fontWeight: 400,
-              color: 'var(--color-text-primary)',
-              margin: '0 0 var(--space-2) 0',
-            }}
-          >
-            Sealed Commit-Reveal Protocol
-          </h2>
-          <p
-            style={{
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-base)',
-              color: 'var(--color-text-secondary)',
-              maxWidth: '720px',
-              margin: 0,
-            }}
-          >
-            Neither party can adapt mid-run or modify their strategy after seeing the
-            opponent&apos;s moves. Cryptographic hashes bind the attack corpus and defense bundle
-            before evaluation starts.
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 'var(--space-6)',
-          }}
-        >
-          {/* Phase 1 */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                color: 'var(--color-primary)',
-                fontWeight: 700,
-              }}
-            >
-              PHASE 01: SEALED COMMIT
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-base)',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-              }}
-            >
-              Cryptographic Commitment
-            </div>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.6,
-                margin: 0,
-              }}
-            >
-              Red commits SHA-256 digests of all test prompts. Blue commits defense
-              rules. State moves from <code>created</code> to <code>committing</code>.
-              Digests are immutably logged into the hash-chain before execution begins.
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted-on-inverse)', marginTop: 'var(--space-3)' }}>
+              Truncation after the last checkpoint cannot be detected by chain alone — documented limitation. External head anchoring mitigates this.
             </p>
           </div>
-
-          {/* Phase 2 */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                color: 'var(--color-accent)',
-                fontWeight: 700,
-              }}
-            >
-              PHASE 02: MEDIATED EXECUTION
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-base)',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-              }}
-            >
-              Redacted Real-Time Evaluation
-            </div>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.6,
-                margin: 0,
-              }}
-            >
-              Prompts execute in random order. During the run, audit events record digests
-              only (SI-08). Raw prompt and response texts remain strictly sealed to prevent
-              leakage to unauthorized observers.
-            </p>
-          </div>
-
-          {/* Phase 3 */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                color: 'var(--color-text-primary)',
-                fontWeight: 700,
-              }}
-            >
-              PHASE 03: VERIFIED REVELATION
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-base)',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-              }}
-            >
-              Independent Audit & Scoring
-            </div>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.6,
-                margin: 0,
-              }}
-            >
-              Upon run conclusion, final attack success rate (ASR) is computed. The
-              independent Verifier walks the entire SHA-256 chain and checks Ed25519
-              signatures, proving historical non-tampering.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Feature Highlights Grid */}
-      <section
-        style={{
-          borderTop: '1px solid var(--color-border-subtle)',
-          paddingTop: 'var(--space-12)',
-        }}
-      >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: 'var(--space-6)',
-          }}
-        >
-          {/* Card: Active Isolation Probes */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: 'var(--space-4)',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-primary)',
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
-                PROVEN BOUNDARIES
-              </div>
-              <h3
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-lg)',
-                  fontWeight: 600,
-                  color: 'var(--color-text-primary)',
-                  margin: '0 0 var(--space-2) 0',
-                }}
-              >
-                Active Isolation Probes
-              </h3>
-              <p
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text-secondary)',
-                  lineHeight: 1.6,
-                  margin: 0,
-                }}
-              >
-                Automated tests execute negative security probes from tenant containers:
-                cross-tenant routing, raw Docker socket access, filesystem writes, and
-                privileged capability escalation. Every attempt fails as designed.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('breakit')}
-              style={{
-                alignSelf: 'flex-start',
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                color: 'var(--color-primary)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-            >
-              <span>Inspect Isolation Probes</span>
-              <ArrowRightIcon size={12} />
-            </button>
-          </div>
-
-          {/* Card: Timing Side-Channel Analysis */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: 'var(--space-4)',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-accent)',
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
-                MICROARCHITECTURAL SAFETY
-              </div>
-              <h3
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-lg)',
-                  fontWeight: 600,
-                  color: 'var(--color-text-primary)',
-                  margin: '0 0 var(--space-2) 0',
-                }}
-              >
-                Timing Side-Channel Analysis
-              </h3>
-              <p
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text-secondary)',
-                  lineHeight: 1.6,
-                  margin: 0,
-                }}
-              >
-                Empirical timing distributions measure KV-cache cross-tenant leakage.
-                When isolated cache mode is active, prefix cache state is strictly
-                partitioned, yielding indistinguishable latency distributions (p &gt;= 0.01).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('timing')}
-              style={{
-                alignSelf: 'flex-start',
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                color: 'var(--color-accent)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-            >
-              <span>View Latency Distributions</span>
-              <ArrowRightIcon size={12} />
-            </button>
-          </div>
-
-          {/* Card: Tamper Detection & Audit Trail */}
-          <div
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-surface)',
-              padding: 'var(--space-6)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: 'var(--space-4)',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-primary)',
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
-                CRYPTOGRAPHIC INTEGRITY
-              </div>
-              <h3
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-lg)',
-                  fontWeight: 600,
-                  color: 'var(--color-text-primary)',
-                  margin: '0 0 var(--space-2) 0',
-                }}
-              >
-                Tamper-Evident Audit Trail
-              </h3>
-              <p
-                style={{
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text-secondary)',
-                  lineHeight: 1.6,
-                  margin: 0,
-                }}
-              >
-                Every token issuance, commitment, model call, and bundle registration is
-                hashed and signed. Tested against simulated tampering cases: row modifications,
-                deletions, and truncations break verification instantly.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('audit')}
-              style={{
-                alignSelf: 'flex-start',
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-            >
-              <span>Audit Trail & Tamper Tests</span>
-              <ArrowRightIcon size={12} />
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 };
+
+// Helper: run state pill
+function RunStatePill({ state }: { state: string }) {
+  const map: Record<string, { bg: string; color: string }> = {
+    concluded:   { bg: 'var(--status-pass-bg)',  color: 'var(--status-pass-text)' },
+    running:     { bg: 'var(--status-info-bg)',   color: 'var(--status-info-text)' },
+    committing:  { bg: 'var(--status-info-bg)',   color: 'var(--status-info-text)' },
+    created:     { bg: 'var(--status-info-bg)',   color: 'var(--status-info-text)' },
+    aborted:     { bg: 'var(--status-warn-bg)',   color: 'var(--status-warn-text)' },
+    failed:      { bg: 'var(--status-fail-bg)',   color: 'var(--status-fail-text)' },
+  };
+  const { bg, color } = map[state] ?? { bg: 'var(--bg-subtle)', color: 'var(--text-muted)' };
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        borderRadius: 'var(--radius-pill)',
+        background: bg,
+        color,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+      }}
+    >
+      {state}
+    </span>
+  );
+}

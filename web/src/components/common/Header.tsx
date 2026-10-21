@@ -1,20 +1,50 @@
 import React, { useState, useEffect } from "react";
-import { useTheme } from "../../context/ThemeContext";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../api/client";
-import { SunIcon, MoonIcon, CheckIcon, WarningIcon, LockIcon } from "./Icons";
-
 import type { ViewType } from "../../types/api";
 
 interface HeaderProps {
   currentView?: ViewType;
-  currentPath?: string;
   onNavigate: (view: ViewType) => void;
   onOpenLogin?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentView = "overview", currentPath: _currentPath, onNavigate, onOpenLogin }) => {
-  const { theme, toggleTheme } = useTheme();
+const navItems: { label: string; view: ViewType }[] = [
+  { label: "Overview", view: "overview" },
+  { label: "Evaluation Runs", view: "runs" },
+  { label: "Audit Verifier", view: "audit" },
+  { label: "Isolation Probes", view: "breakit" },
+  { label: "Timing Analysis", view: "timing" },
+  { label: "Threat Model", view: "threat" },
+  { label: "Privacy", view: "data-handling" },
+];
+
+// Hamburger icon
+const MenuIcon: React.FC<{ open: boolean }> = ({ open }) => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    {open ? (
+      <>
+        <line x1="4" y1="4" x2="16" y2="16" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+        <line x1="16" y1="4" x2="4" y2="16" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      </>
+    ) : (
+      <>
+        <line x1="3" y1="6" x2="17" y2="6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+        <line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+        <line x1="3" y1="14" x2="17" y2="14" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      </>
+    )}
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+export const Header: React.FC<HeaderProps> = ({ currentView = "overview", onNavigate, onOpenLogin }) => {
   const { isAuthenticated, logout, openLoginModal } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [healthOk, setHealthOk] = useState<boolean | null>(null);
@@ -24,30 +54,15 @@ export const Header: React.FC<HeaderProps> = ({ currentView = "overview", curren
     const checkHealth = async () => {
       try {
         const res = await api.getHealth();
-        if (mounted) {
-          setHealthOk(res.status === "ok");
-        }
+        if (mounted) setHealthOk(res.status === "ok");
       } catch {
         if (mounted) setHealthOk(false);
       }
     };
     checkHealth();
     const interval = setInterval(checkHealth, 30000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
-
-  const navItems: { label: string; view: ViewType; path: string }[] = [
-    { label: "Overview", view: "overview", path: "/" },
-    { label: "Runs", view: "runs", path: "/runs" },
-    { label: "Audit log", view: "audit", path: "/audit" },
-    { label: "Active probes", view: "breakit", path: "/breakit" },
-    { label: "Timing", view: "timing", path: "/timing" },
-    { label: "Threat model", view: "threat", path: "/threat-model" },
-    { label: "Data handling", view: "data-handling", path: "/data-handling" },
-  ];
 
   const handleNavClick = (view: ViewType) => {
     onNavigate(view);
@@ -55,261 +70,273 @@ export const Header: React.FC<HeaderProps> = ({ currentView = "overview", curren
   };
 
   return (
-    <header
-      style={{
-        borderBottom: "1px solid var(--color-border-divider)",
-        backgroundColor: "var(--color-surface-panel)",
-      }}
-    >
-      <div
-        className="container"
+    <>
+      <header
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          height: "64px",
-          gap: "var(--space-4)",
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          background: "rgba(244, 242, 236, 0.92)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          borderBottom: "1px solid var(--border-subtle)",
         }}
       >
-        {/* Brand wordmark */}
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
-          <button
-            type="button"
-            onClick={() => handleNavClick("overview")}
-            className="font-display"
-            style={{
-              fontSize: "var(--font-size-xl)",
-              textDecoration: "none",
-              color: "var(--color-text-primary)",
-              border: "none",
-              padding: 0,
-              background: "none",
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Bayora
-          </button>
-
-          {/* Service health indicator */}
-          <span
-            className="header-health-badge"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              fontSize: "var(--font-size-xs)",
-              fontWeight: "var(--font-weight-strong)",
-              padding: "2px var(--space-2)",
-              border: "1px solid var(--color-border-divider)",
-              color:
-                healthOk === true
-                  ? "var(--color-status-pass-text)"
-                  : healthOk === false
-                  ? "var(--color-status-fail-text)"
-                  : "var(--color-text-secondary)",
-              backgroundColor:
-                healthOk === true
-                  ? "var(--color-status-pass-bg)"
-                  : healthOk === false
-                  ? "var(--color-status-fail-bg)"
-                  : "var(--color-surface-sunken)",
-            }}
-          >
-            {healthOk === true ? (
-              <CheckIcon size={12} />
-            ) : healthOk === false ? (
-              <WarningIcon size={12} />
-            ) : null}
-            <span>{healthOk === true ? "Services healthy" : healthOk === false ? "Degraded" : "Checking"}</span>
-          </span>
-        </div>
-
-        {/* Desktop Navigation */}
-        <nav
-          aria-label="Main navigation"
+        <div
+          className="container"
           style={{
-            display: "none",
+            display: "flex",
             alignItems: "center",
+            height: "var(--nav-height)",
             gap: "var(--space-5)",
           }}
-          className="desktop-nav"
         >
-          {navItems.map((item) => {
-            const isCurrent = currentView === item.view;
-            return (
-              <button
-                key={item.view}
-                type="button"
-                onClick={() => handleNavClick(item.view)}
-                aria-current={isCurrent ? "page" : undefined}
-                style={{
-                  color: isCurrent ? "var(--color-accent-primary)" : "var(--color-text-primary)",
-                  border: "none",
-                  background: "none",
-                  fontWeight: isCurrent ? "var(--font-weight-strong)" : "var(--font-weight-base)",
-                  textDecoration: "none",
-                  borderBottom: isCurrent ? "2px solid var(--color-accent-primary)" : "2px solid transparent",
-                  padding: "var(--space-2) 0",
-                  height: "44px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Action Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexShrink: 0 }}>
-          {/* Light/Dark Mode Toggle */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            style={{
-              border: "1px solid var(--color-border-control)",
-              padding: "var(--space-2)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--color-text-primary)",
-              background: "var(--color-surface-panel)",
-              height: "36px",
-              width: "36px",
-            }}
-          >
-            {theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-          </button>
-
-          {/* Operator sign-in button or status */}
-          {isAuthenticated ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span
-                style={{
-                  fontSize: "var(--font-size-xs)",
-                  color: "var(--color-status-pass-text)",
-                  backgroundColor: "var(--color-status-pass-bg)",
-                  border: "1px solid var(--color-status-pass-text)",
-                  padding: "2px var(--space-2)",
-                  fontWeight: "var(--font-weight-strong)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                <LockIcon size={12} />
-                <span>Operator</span>
-              </span>
-              <button
-                type="button"
-                onClick={logout}
-                style={{
-                  border: "1px solid var(--color-border-control)",
-                  padding: "2px var(--space-2)",
-                  fontSize: "var(--font-size-xs)",
-                  color: "var(--color-text-primary)",
-                  background: "var(--color-surface-panel)",
-                  height: "36px",
-                }}
-              >
-                Sign out
-              </button>
-            </div>
-          ) : (
+          {/* Brand wordmark */}
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexShrink: 0 }}>
             <button
               type="button"
-              onClick={onOpenLogin || openLoginModal}
+              onClick={() => handleNavClick("overview")}
               style={{
-                border: "1px solid var(--color-border-control)",
-                padding: "0 var(--space-2)",
-                fontSize: "var(--font-size-xs)",
-                fontWeight: "var(--font-weight-strong)",
-                color: "var(--color-text-primary)",
-                background: "var(--color-surface-panel)",
-                height: "36px",
+                fontFamily: "var(--font-display)",
+                fontSize: "1.4rem",
+                color: "var(--text-primary)",
+                border: "none",
+                background: "none",
+                padding: 0,
+                cursor: "pointer",
+                letterSpacing: "-0.01em",
+                fontWeight: 400,
+              }}
+              aria-label="Bayora home"
+            >
+              Bayora
+            </button>
+
+            {/* Health badge — hidden below 600px via CSS class */}
+            <span
+              className="header-health-badge"
+              style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "4px",
+                gap: "5px",
+                padding: "3px 8px",
+                borderRadius: "var(--radius-pill)",
+                background: healthOk === true
+                  ? "var(--status-pass-bg)"
+                  : healthOk === false
+                    ? "var(--status-fail-bg)"
+                    : "var(--bg-subtle)",
+                border: `1px solid ${healthOk === true
+                  ? "var(--status-pass-border)"
+                  : healthOk === false
+                    ? "var(--status-fail-border)"
+                    : "var(--border-subtle)"}`,
+                color: healthOk === true
+                  ? "var(--status-pass-text)"
+                  : healthOk === false
+                    ? "var(--status-fail-text)"
+                    : "var(--text-muted)",
+                fontSize: "0.7rem",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
               }}
             >
-              <LockIcon size={12} />
-              <span>Operator</span>
-            </button>
-          )}
+              {healthOk === true && (
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--status-pass-text)",
+                    animation: "pulse-dot 2s ease-in-out infinite",
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+              {healthOk === true
+                ? "Services Healthy"
+                : healthOk === false
+                  ? "Degraded"
+                  : "Checking…"}
+            </span>
+          </div>
 
-          {/* Mobile menu toggle button */}
-          <button
-            type="button"
-            className="mobile-menu-btn"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-expanded={mobileMenuOpen}
-            aria-label="Toggle navigation menu"
+          {/* Desktop Navigation — shown ≥ 960px */}
+          <nav
+            className="desktop-nav"
+            aria-label="Main navigation"
             style={{
-              border: "1px solid var(--color-border-control)",
-              padding: "0 var(--space-3)",
-              height: "36px",
-              fontSize: "var(--font-size-xs)",
-              fontWeight: "var(--font-weight-strong)",
-              color: "var(--color-text-primary)",
-              background: "var(--color-surface-panel)",
+              display: "none",
+              alignItems: "center",
+              gap: "2px",
+              flex: 1,
             }}
           >
-            {mobileMenuOpen ? "Close" : "Menu"}
-          </button>
-        </div>
-      </div>
+            {navItems.map((item) => {
+              const active = currentView === item.view;
+              return (
+                <button
+                  key={item.view}
+                  type="button"
+                  onClick={() => handleNavClick(item.view)}
+                  aria-current={active ? "page" : undefined}
+                  style={{
+                    position: "relative",
+                    padding: "6px 10px",
+                    border: "none",
+                    background: active ? "rgba(46,74,54,0.08)" : "none",
+                    borderRadius: "var(--radius-sm)",
+                    color: active ? "var(--accent-primary)" : "var(--text-secondary)",
+                    fontSize: "0.82rem",
+                    fontWeight: active ? 600 : 400,
+                    fontFamily: "var(--font-sans)",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "background var(--motion-fast), color var(--motion-fast)",
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
 
-      {/* Mobile navigation drawer */}
-      {mobileMenuOpen && (
-        <nav
-          aria-label="Mobile navigation"
-          style={{
-            borderTop: "1px solid var(--color-border-divider)",
-            backgroundColor: "var(--color-surface-panel)",
-            padding: "var(--space-4)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-2)",
-          }}
-        >
-          {navItems.map((item) => {
-            const isCurrent = currentView === item.view;
-            return (
+          {/* Spacer on desktop so operator button stays right */}
+          <div className="desktop-nav" style={{ flex: "none", display: "none" }} />
+
+          {/* Right actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginLeft: "auto", flexShrink: 0 }}>
+            {/* Operator status / sign-in */}
+            {isAuthenticated ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: "0.72rem",
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 600,
+                    color: "var(--status-pass-text)",
+                    background: "var(--status-pass-bg)",
+                    border: "1px solid var(--status-pass-border)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "3px 8px",
+                  }}
+                >
+                  <LockIcon /> Operator
+                </span>
+                <button
+                  type="button"
+                  onClick={logout}
+                  style={{
+                    height: 32,
+                    padding: "0 10px",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "0.75rem",
+                    fontFamily: "var(--font-sans)",
+                    color: "var(--text-secondary)",
+                    background: "transparent",
+                    cursor: "pointer",
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : (
               <button
-                key={item.view}
                 type="button"
-                onClick={() => handleNavClick(item.view)}
-                aria-current={isCurrent ? "page" : undefined}
+                onClick={onOpenLogin || openLoginModal}
                 style={{
-                  textAlign: "left",
-                  color: isCurrent ? "var(--color-accent-primary)" : "var(--color-text-primary)",
-                  fontWeight: isCurrent ? "var(--font-weight-strong)" : "var(--font-weight-base)",
-                  padding: "var(--space-2) var(--space-3)",
-                  border: isCurrent ? "1px solid var(--color-accent-primary)" : "1px solid transparent",
-                  backgroundColor: isCurrent ? "var(--color-surface-sunken)" : "transparent",
-                  fontSize: "var(--font-size-sm)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  height: 32,
+                  padding: "0 10px",
+                  border: "1px solid var(--border-strong)",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "0.75rem",
+                  fontFamily: "var(--font-sans)",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  background: "transparent",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
               >
-                {item.label}
+                <LockIcon />
+                Operator
               </button>
-            );
-          })}
-        </nav>
-      )}
+            )}
 
-      <style>{`
-        @media (min-width: 768px) {
-          .desktop-nav {
-            display: flex !important;
-          }
-          .mobile-menu-btn {
-            display: none !important;
-          }
-        }
-      `}</style>
-    </header>
+            {/* Hamburger — shown < 960px */}
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-expanded={mobileMenuOpen}
+              aria-label="Toggle navigation menu"
+              style={{
+                display: "none",
+                alignItems: "center",
+                justifyContent: "center",
+                height: 36,
+                width: 36,
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text-primary)",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              <MenuIcon open={mobileMenuOpen} />
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile drawer */}
+        {mobileMenuOpen && (
+          <nav
+            aria-label="Mobile navigation"
+            style={{
+              borderTop: "1px solid var(--border-subtle)",
+              background: "rgba(244, 242, 236, 0.98)",
+              padding: "var(--space-3) var(--space-4) var(--space-5)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-1)",
+            }}
+          >
+            {navItems.map((item) => {
+              const active = currentView === item.view;
+              return (
+                <button
+                  key={item.view}
+                  type="button"
+                  onClick={() => handleNavClick(item.view)}
+                  aria-current={active ? "page" : undefined}
+                  style={{
+                    textAlign: "left",
+                    padding: "var(--space-3) var(--space-3)",
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    background: active ? "rgba(46,74,54,0.08)" : "transparent",
+                    color: active ? "var(--accent-primary)" : "var(--text-primary)",
+                    fontWeight: active ? 600 : 400,
+                    fontSize: "var(--text-sm)",
+                    fontFamily: "var(--font-sans)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        )}
+      </header>
+    </>
   );
 };
