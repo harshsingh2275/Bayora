@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import ssl
 from typing import Any
 import urllib.error
 import urllib.parse
@@ -113,6 +114,15 @@ def discover_web_url() -> str:
     """Discover reachable URL for bayora-web on the host."""
     if os.environ.get("WEB_URL"):
         return os.environ["WEB_URL"].rstrip("/")
+    ssl_ctx = ssl._create_unverified_context()
+    for candidate in ["http://127.0.0.1:8088", "https://localhost", "http://localhost"]:
+        try:
+            req = urllib.request.Request(f"{candidate}/health")
+            with urllib.request.urlopen(req, timeout=1.0, context=ssl_ctx) as resp:
+                if resp.status in (200, 308):
+                    return candidate
+        except Exception:
+            continue
     return "http://127.0.0.1:8088"
 
 
@@ -240,8 +250,9 @@ def http_request(
         req_headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
+    ssl_ctx = ssl._create_unverified_context()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
             raw = resp.read().decode("utf-8")
             try:
                 return resp.status, json.loads(raw)

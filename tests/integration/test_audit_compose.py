@@ -44,16 +44,35 @@ def _exec_in_container(container: str, python_code: str) -> dict:
     return json.loads(res.stdout.strip())
 
 
+def _get_web_url() -> tuple[str, Any]:
+    import os
+    import ssl
+    ssl_ctx = ssl._create_unverified_context()
+    if os.environ.get("WEB_URL"):
+        return os.environ["WEB_URL"], ssl_ctx
+    for candidate in ["http://127.0.0.1:8088", "https://localhost", "http://localhost"]:
+        try:
+            req = urllib.request.Request(f"{candidate}/health")
+            with urllib.request.urlopen(req, timeout=1.0, context=ssl_ctx) as resp:
+                if resp.status in (200, 308):
+                    return candidate, ssl_ctx
+        except Exception:
+            continue
+    return "http://127.0.0.1:8088", ssl_ctx
+
+
 @pytest.fixture(scope="module", autouse=True)
 def clean_audit_log():
     """Clear log files and restart logger & verifier so tests run against a fresh genesis chain."""
     clean_code = "import os; [os.unlink(p) for p in ['/app/log-data/log.jsonl', '/app/log-data/checkpoints.jsonl'] if os.path.exists(p)]"
     subprocess.run(["docker", "compose", "exec", "-T", "logger", "python3", "-c", clean_code], check=True)
     subprocess.run(["docker", "compose", "restart", "logger", "verifier"], check=True)
+    web_url, ssl_ctx = _get_web_url()
     # Wait until verifier and gateway are responsive
     for _ in range(20):
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8088/api/verify", timeout=1.0) as resp:
+            req = urllib.request.Request(f"{web_url}/api/verify")
+            with urllib.request.urlopen(req, timeout=1.0, context=ssl_ctx) as resp:
                 if resp.status == 200:
                     break
         except Exception:
@@ -113,7 +132,9 @@ def test_verifier_endpoint_returns_ok_true():
       - head.seq must be 24
       - errors must be []
     """
-    with urllib.request.urlopen("http://127.0.0.1:8088/api/verify", timeout=5.0) as resp:
+    web_url, ssl_ctx = _get_web_url()
+    req = urllib.request.Request(f"{web_url}/api/verify")
+    with urllib.request.urlopen(req, timeout=5.0, context=ssl_ctx) as resp:
         assert resp.status == 200
         data = json.loads(resp.read().decode())
 
@@ -134,7 +155,9 @@ def test_verifier_tamper_demo_all_cases():
       - truncate_before_checkpoint: detected True
       - truncate_after_checkpoint: detected False (expected limitation!)
     """
-    with urllib.request.urlopen("http://127.0.0.1:8088/api/verify/tamper-demo", timeout=10.0) as resp:
+    web_url, ssl_ctx = _get_web_url()
+    req = urllib.request.Request(f"{web_url}/api/verify/tamper-demo")
+    with urllib.request.urlopen(req, timeout=10.0, context=ssl_ctx) as resp:
         assert resp.status == 200
         data = json.loads(resp.read().decode())
 
@@ -195,9 +218,11 @@ except e.HTTPError as err:
     finally:
         # 2. Restart logger and wait for healthy
         subprocess.run(["docker", "compose", "start", "logger"], check=True)
+        web_url, ssl_ctx = _get_web_url()
         for _ in range(20):
             try:
-                with urllib.request.urlopen("http://127.0.0.1:8088/api/health", timeout=1.0) as resp:
+                req = urllib.request.Request(f"{web_url}/api/health")
+                with urllib.request.urlopen(req, timeout=1.0, context=ssl_ctx) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode())
                         if data.get("services", {}).get("logger") is True:

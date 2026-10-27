@@ -156,15 +156,34 @@ print(json.dumps({"status": res.status, "body": body}))
 def test_web_proxy_blocks_v1_and_allows_api():
     import urllib.request as u
     import urllib.error as e
+    import os
+    import ssl
+
+    ssl_ctx = ssl._create_unverified_context()
+    web_url = os.environ.get("WEB_URL")
+    if not web_url:
+        for candidate in ["http://localhost:8088", "https://localhost", "http://localhost"]:
+            try:
+                req = u.Request(f"{candidate}/health")
+                with u.urlopen(req, timeout=1.0, context=ssl_ctx) as r:
+                    if r.status in (200, 308):
+                        web_url = candidate
+                        break
+            except Exception:
+                continue
+    if not web_url:
+        web_url = "http://localhost:8088"
 
     # SI-11: Public proxy exposes /api/* only. /v1/* returns 404.
     try:
-        u.urlopen("http://localhost:8088/v1/red/work")
+        req = u.Request(f"{web_url}/v1/red/work")
+        u.urlopen(req, context=ssl_ctx)
         assert False, "Should have returned 404"
     except e.HTTPError as err:
         assert err.code == 404
 
-    res = u.urlopen("http://localhost:8088/api/health")
+    req = u.Request(f"{web_url}/api/health")
+    res = u.urlopen(req, context=ssl_ctx)
     assert res.status == 200
     body = json.loads(res.read().decode())
     assert body["status"] == "ok"

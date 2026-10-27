@@ -1,0 +1,49 @@
+# docker-compose.prod.yml: Production compose overrides for Bayora
+# SECURITY: Baseline hardening rules (SI-01..SI-11, architecture §2, §3, §4, §14)
+# - Caddy with automatic HTTPS for ${DOMAIN}
+# - restart: unless-stopped on all services
+# - Only ports 80 and 443 published by web; no other service publishes ports (SI-03, SI-11)
+# - Documented NET_BIND_SERVICE exception for web to bind ports 80 and 443 as non-root user 10001:10001
+# - Writable named volumes only for Caddy data and config (/data, /config)
+
+services:
+  web:
+    restart: unless-stopped
+    cap_add:
+      # EXCEPTION (Architecture §3): web adds NET_BIND_SERVICE only to bind ports 80 and 443 as non-root user 10001:10001
+      - NET_BIND_SERVICE
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - XDG_DATA_HOME=/data
+      - XDG_CONFIG_HOME=/config
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      # SECURITY: Writable named volumes only for Caddy state and config (Architecture §3, §4)
+      - caddy-data:/data:rw
+      - caddy-config:/config:rw
+      - ./web/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+    ports: !override
+      # SECURITY (SI-11 & Architecture §2): Only web publishes ports in production; 80 (HTTP/ACME) and 443 (HTTPS)
+      - "80:80"
+      - "443:443"
+
+  gateway:
+    restart: unless-stopped
+
+  model-red:
+    restart: unless-stopped
+
+  model-blue:
+    restart: unless-stopped
+
+  logger:
+    restart: unless-stopped
+
+  verifier:
+    restart: unless-stopped
+
+  red:
+    restart: unless-stopped
+
+  blue:
+    restart: unless-stopped

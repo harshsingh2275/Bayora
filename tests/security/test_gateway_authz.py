@@ -57,8 +57,24 @@ def _discover_gateway_url() -> Optional[str]:
     return None
 
 
+def _discover_web_url() -> str:
+    if os.environ.get("WEB_URL"):
+        return os.environ["WEB_URL"]
+    import ssl
+    ssl_ctx = ssl._create_unverified_context()
+    for candidate in ["http://127.0.0.1:8088", "https://localhost", "http://localhost"]:
+        try:
+            req = urllib.request.Request(f"{candidate}/health")
+            with urllib.request.urlopen(req, timeout=1.0, context=ssl_ctx) as resp:
+                if resp.status in (200, 308):
+                    return candidate
+        except Exception:
+            continue
+    return "http://127.0.0.1:8088"
+
+
 GATEWAY_URL = _discover_gateway_url()
-WEB_URL = os.environ.get("WEB_URL", "http://127.0.0.1:8088")
+WEB_URL = _discover_web_url()
 
 pytestmark = pytest.mark.skipif(
     GATEWAY_URL is None,
@@ -619,7 +635,7 @@ async def test_public_proxy_blocks_v1_endpoints():
         "/v1/arbitrary_path",
     ]
 
-    async with httpx.AsyncClient(base_url=WEB_URL) as client:
+    async with httpx.AsyncClient(base_url=WEB_URL, verify=False, follow_redirects=True) as client:
         for path in blocked_paths:
             # Test GET
             r_get = await client.get(path)
@@ -637,7 +653,7 @@ async def test_public_proxy_blocks_v1_endpoints():
 @pytest.mark.asyncio
 async def test_public_proxy_allows_api_health():
     """SECURITY: §2 & SI-11 - Web proxy routes /api/* (e.g. /api/health -> 200)."""
-    async with httpx.AsyncClient(base_url=WEB_URL) as client:
+    async with httpx.AsyncClient(base_url=WEB_URL, verify=False, follow_redirects=True) as client:
         resp = await client.get("/api/health")
         assert (
             resp.status_code == 200

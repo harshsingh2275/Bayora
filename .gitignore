@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 secrets/
+backups/
 
 # Data directory (only blue bundles and data/README.md are committed)
 data/*

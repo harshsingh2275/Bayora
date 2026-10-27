@@ -1,7 +1,7 @@
 # Bayora Makefile
 # Source: docs/architecture.md §13
 
-.PHONY: up down logs test test-security breakit timing verify-log lint sync-agents check
+.PHONY: up prod-up down logs test test-security breakit timing verify-log lint sync-agents check
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -9,6 +9,9 @@ PYTEST := $(VENV)/bin/pytest
 
 up:
 	docker compose up -d
+
+prod-up:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 down:
 	docker compose down

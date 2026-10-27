@@ -923,7 +923,12 @@ async def test_abort_lifecycle_and_timeout_behavior():
         assert abort_op.status_code == 200
 
         # State must now be 'aborted'
-        detail = (await client.get(f"/api/runs/{run_id}")).json()
+        resp = await client.get(f"/api/runs/{run_id}")
+        if resp.status_code == 429:
+            await asyncio.sleep(1.0)
+            resp = await client.get(f"/api/runs/{run_id}")
+        assert resp.status_code == 200
+        detail = resp.json()
         assert detail["state"] == "aborted"
 
         # 10c. Subsequent mutations on aborted run must return 409
@@ -1040,6 +1045,9 @@ async def test_results_digest_integrity_against_audit_log():
         for _ in range(25):
             url = "/api/log?limit=100" + (f"&after={after_seq}" if after_seq is not None else "")
             log_res = await client.get(url)
+            if log_res.status_code == 429:
+                await asyncio.sleep(1.0)
+                log_res = await client.get(url)
             assert log_res.status_code == 200
             batch = log_res.json().get("entries", [])
             if not batch:
