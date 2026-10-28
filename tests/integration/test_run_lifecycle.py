@@ -364,11 +364,23 @@ async def test_full_run_lifecycle_acceptance(app_client: tuple[AsyncClient, Reco
     computed_digest = hashlib.sha256(canonical_revealed.encode("utf-8")).hexdigest()
     assert logged_results_digest == computed_digest, "Canonical results_digest mismatch!"
 
-    # Verify public results preview caps at 80 chars and does not leak rule ids
+    # Verify public results contains only allowed fields and does not leak prompt text or rule ids
     for att in results_json["attacks"]:
-        assert len(att["prompt_preview"]) <= 80
+        assert set(att.keys()) == {"idx", "prompt_digest", "source", "category", "outcome", "latency_ms", "prompt_preview"}
+        assert "prompt" not in att
         assert "rule_id" not in att
         assert "response_text" not in att
+        assert att["source"] in ("advbench", "gandalf", "custom")
+        assert att["category"] in (
+            "harmful_behavior",
+            "prompt_injection",
+            "roleplay_jailbreak",
+            "academic_framing",
+            "hypothetical_framing",
+            "test",
+        )
+        if att["source"] == "advbench" or att["category"] == "harmful_behavior":
+            assert att["prompt_preview"] == "[PROMPT REDACTED FOR PUBLIC VIEW]"
 
     # 13. Acceptance check: Red vs Blue report asymmetry (§5)
     r_report = await red.get_report(run_id)

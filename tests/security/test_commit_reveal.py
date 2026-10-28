@@ -120,11 +120,22 @@ def _canonical_digest(obj: Any) -> str:
 
 async def _abort_any_active_run(client: httpx.AsyncClient) -> None:
     """SECURITY: Clean up any active runs to ensure isolated test execution."""
-    resp = await client.get("/api/runs")
-    if resp.status_code == 200:
-        for r in resp.json().get("runs", []):
-            if r["state"] not in ("concluded", "aborted", "failed"):
-                await client.post(f"/api/runs/{r['run_id']}/abort", headers=OP_HEADERS)
+    for _ in range(15):
+        resp = await client.get("/api/runs")
+        if resp.status_code == 429:
+            await asyncio.sleep(1.0)
+            continue
+        if resp.status_code != 200:
+            break
+        active = [
+            r for r in resp.json().get("runs", [])
+            if r["state"] not in ("concluded", "aborted", "failed")
+        ]
+        if not active:
+            break
+        for r in active:
+            await client.post(f"/api/runs/{r['run_id']}/abort", headers=OP_HEADERS)
+        await asyncio.sleep(0.5)
 
 
 def _default_bundle() -> Dict[str, Any]:
@@ -548,8 +559,8 @@ async def test_read_reports_before_conclusion_and_cross_tenant():
 
 @pytest.mark.asyncio
 async def test_public_view_and_results_privacy_before_and_after_conclusion():
-    """SECURITY: §5, §10 (A5) & SI-08 - Public view must never leak prompts beyond 80 chars after conclusion,
-    never before, never rule ids, never full model responses."""
+    """SECURITY: §5, §10 (A5) & SI-08 - Public view must never leak prompt text before or after conclusion,
+    never rule ids, never full model responses."""
     async with httpx.AsyncClient(base_url=GATEWAY_URL, timeout=30.0) as client:
         await _abort_any_active_run(client)
 
@@ -613,11 +624,23 @@ async def test_public_view_and_results_privacy_before_and_after_conclusion():
         results_data = res_post.json()
 
         assert "attacks" in results_data
+        assert "SUPER_SECRET_PAYLOAD" not in res_post.text, "LEAK: Secret payload leaked in public results!"
+        assert "SUPER_SECRET_PAYLOAD_PAST_EIGHTY_CHARS" not in res_post.text, "LEAK: Secret prompt leaked in public results!"
         for item in results_data["attacks"]:
-            preview = item.get("prompt_preview", "")
-            # SECURITY: Prompt preview must be capped at 80 characters
-            assert len(preview) <= 80, f"LEAK: prompt_preview exceeded 80 chars ({len(preview)} chars): {preview}"
-            assert "SUPER_SECRET_PAYLOAD_PAST_EIGHTY_CHARS" not in preview, "LEAK: Characters past index 80 exposed in preview!"
+            # SECURITY: Exact keys check
+            assert set(item.keys()) == {"idx", "prompt_digest", "source", "category", "outcome", "latency_ms", "prompt_preview"}
+            assert item["source"] in ("advbench", "gandalf", "custom")
+            assert item["category"] in (
+                "harmful_behavior",
+                "prompt_injection",
+                "roleplay_jailbreak",
+                "academic_framing",
+                "hypothetical_framing",
+                "test",
+            )
+            # SECURITY: Harmful prompts must be redacted
+            if item["source"] == "advbench" or item["category"] == "harmful_behavior":
+                assert item["prompt_preview"] == "[PROMPT REDACTED FOR PUBLIC VIEW]"
 
             # SECURITY: Never expose full raw prompts in public results
             assert "prompt" not in item, "LEAK: Raw prompt key exposed in public results!"
@@ -1079,3 +1102,245 @@ async def test_results_digest_integrity_against_audit_log():
         assert tampered_digest != logged_results_digest, (
             "Tampered results produced identical digest! Hash collision or broken verification."
         )
+
+
+@pytest.mark.asyncio
+async def test_commit_validation_rejects_unknown_category_and_extra_fields():
+    """SECURITY: §5, SI-06 - Commit endpoint rejects unknown categories, unknown sources,
+    and extra fields with 422."""
+    async with httpx.AsyncClient(base_url=GATEWAY_URL, timeout=30.0) as client:
+        await _abort_any_active_run(client)
+
+        create_res = await client.post(
+            "/api/runs",
+            headers=OP_HEADERS,
+            json={"name": "test-commit-val", "attack_count": 2, "seed": 401, "bundle": "baseline"},
+        )
+        assert create_res.status_code == 201
+        run_id = create_res.json()["run_id"]
+
+        d1 = hashlib.sha256(b"p1").hexdigest()
+        d2 = hashlib.sha256(b"p2").hexdigest()
+        sd = hashlib.sha256(f"{d1}\n{d2}".encode()).hexdigest()
+
+        # 1. Unknown category -> 422
+        bad_cat_payload = {
+            "count": 2,
+            "digests": [d1, d2],
+            "set_digest": sd,
+            "attacks": [
+                {"idx": 0, "source": "advbench", "category": "harmful_behavior"},
+                {"idx": 1, "source": "advbench", "category": "nonexistent_evil_category"},
+            ],
+        }
+        r1 = await client.post(f"/v1/red/runs/{run_id}/commit", headers=RED_HEADERS, json=bad_cat_payload)
+        assert r1.status_code == 422, f"Expected 422 for unknown category, got {r1.status_code}"
+
+        # 2. Unknown source -> 422
+        bad_src_payload = {
+            "count": 2,
+            "digests": [d1, d2],
+            "set_digest": sd,
+            "attacks": [
+                {"idx": 0, "source": "unknown_attacker_source", "category": "harmful_behavior"},
+                {"idx": 1, "source": "advbench", "category": "harmful_behavior"},
+            ],
+        }
+        r2 = await client.post(f"/v1/red/runs/{run_id}/commit", headers=RED_HEADERS, json=bad_src_payload)
+        assert r2.status_code == 422, f"Expected 422 for unknown source, got {r2.status_code}"
+
+        # 3. Extra field in attack item -> 422 (SI-06 extra="forbid")
+        extra_item_payload = {
+            "count": 2,
+            "digests": [d1, d2],
+            "set_digest": sd,
+            "attacks": [
+                {"idx": 0, "source": "advbench", "category": "harmful_behavior", "extra_field": "leak"},
+                {"idx": 1, "source": "advbench", "category": "harmful_behavior"},
+            ],
+        }
+        r3 = await client.post(f"/v1/red/runs/{run_id}/commit", headers=RED_HEADERS, json=extra_item_payload)
+        assert r3.status_code == 422, f"Expected 422 for extra field in attack item, got {r3.status_code}"
+
+        # 4. Extra field in commit body -> 422 (SI-06 extra="forbid")
+        extra_body_payload = {
+            "count": 2,
+            "digests": [d1, d2],
+            "set_digest": sd,
+            "prompt_preview": "forbidden",
+        }
+        r4 = await client.post(f"/v1/red/runs/{run_id}/commit", headers=RED_HEADERS, json=extra_body_payload)
+        assert r4.status_code == 422, f"Expected 422 for extra field in commit body, got {r4.status_code}"
+
+        await _abort_any_active_run(client)
+
+
+@pytest.mark.asyncio
+async def test_public_endpoints_never_leak_pool_prompts_and_results_exact_keys():
+    """SECURITY: SI-08 & DO items 1 & 4 - Public endpoints must never leak red pool prompts
+    (checked against at least 20 prompts, first 30 chars each) before or after conclusion.
+    GET /api/runs/{id}/results items must match exact allowed keys and allowlisted taxonomies."""
+    from gateway.app.taxonomies import ALLOWED_CATEGORIES, ALLOWED_SOURCES
+
+    # Load red pool prompts
+    pool_path = os.path.join(REPO_ROOT, "data", "red", "pool.jsonl")
+    assert os.path.isfile(pool_path), f"Pool file not found at {pool_path}"
+
+    pool_records: list[dict[str, Any]] = []
+    with open(pool_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                pool_records.append(json.loads(line))
+
+    assert len(pool_records) >= 20, f"Need at least 20 pool prompts, found {len(pool_records)}"
+
+    # Take at least 20 prompt prefixes (first 30 characters each)
+    prefixes = [r["prompt"][:30] for r in pool_records[:25] if len(r["prompt"]) >= 30][:20]
+    assert len(prefixes) == 20, f"Could not extract 20 30-char prefixes (got {len(prefixes)})"
+
+    async with httpx.AsyncClient(base_url=GATEWAY_URL, timeout=45.0) as client:
+        await _abort_any_active_run(client)
+
+        # Create a run using 3 prompts from the red pool
+        num_attacks = 3
+        chosen = pool_records[:num_attacks]
+        create_res = None
+        for _ in range(5):
+            await _abort_any_active_run(client)
+            create_res = await client.post(
+                "/api/runs",
+                headers=OP_HEADERS,
+                json={"name": "test-prompt-leak-prevention", "attack_count": num_attacks, "seed": 777, "bundle": "baseline"},
+            )
+            if create_res.status_code == 201:
+                break
+            await asyncio.sleep(1.0)
+        assert create_res is not None
+        assert create_res.status_code == 201
+        run_id = create_res.json()["run_id"]
+
+        digests = [hashlib.sha256(rec["prompt"].encode("utf-8")).hexdigest() for rec in chosen]
+        set_digest = hashlib.sha256("\n".join(digests).encode("utf-8")).hexdigest()
+
+        commit_attacks = [
+            {"idx": i, "source": rec.get("source", "advbench"), "category": rec.get("category", "harmful_behavior")}
+            for i, rec in enumerate(chosen)
+        ]
+
+        # Red commits
+        c_res = await client.post(
+            f"/v1/red/runs/{run_id}/commit",
+            headers=RED_HEADERS,
+            json={"count": num_attacks, "digests": digests, "set_digest": set_digest, "attacks": commit_attacks},
+        )
+        assert c_res.status_code == 200
+
+        # Blue defends
+        d_res = await client.put(
+            f"/v1/blue/runs/{run_id}/defense",
+            headers=BLUE_HEADERS,
+            json={
+                "bundle": {
+                    "version": "baseline-v1",
+                    "input_rules": [],
+                    "output_rules": [],
+                    "refusal_text": "Request blocked by safety policy.",
+                }
+            },
+        )
+        assert d_res.status_code in (200, 409)
+
+        # ── BEFORE CONCLUSION: Check EVERY public endpoint ────────────────────
+        public_endpoints_mid = [
+            "/api/health",
+            "/api/topology",
+            "/api/runs",
+            f"/api/runs/{run_id}",
+            f"/api/runs/{run_id}/results",
+            "/api/log?limit=50",
+            "/api/verify",
+            "/api/verify/tamper-demo",
+            "/api/breakit/latest",
+            "/api/experiments/timing/latest",
+            "/api/cache-mode",
+        ]
+        for ep in public_endpoints_mid:
+            resp = await client.get(ep)
+            if resp.status_code == 429:
+                await asyncio.sleep(1.0)
+                resp = await client.get(ep)
+            if ep.endswith("/results"):
+                assert resp.status_code == 403, f"Expected 403 before conclusion for {ep}, got {resp.status_code}"
+            else:
+                assert resp.status_code in (200, 404, 429), f"Unexpected status for {ep}: {resp.status_code}"
+
+            for prefix in prefixes:
+                assert prefix not in resp.text, (
+                    f"LEAK BEFORE CONCLUSION: prompt prefix '{prefix[:15]}...' leaked in {ep}!"
+                )
+
+        # Execute the attacks
+        for i, rec in enumerate(chosen):
+            atk_res = await client.post(
+                f"/v1/red/runs/{run_id}/attack",
+                headers=RED_HEADERS,
+                json={"idx": i, "prompt": rec["prompt"]},
+            )
+            assert atk_res.status_code == 200
+
+        # Conclude run
+        done_res = await client.post(
+            f"/v1/red/runs/{run_id}/done",
+            headers=RED_HEADERS,
+            json={"sent": num_attacks},
+        )
+        assert done_res.status_code == 200
+
+        # ── AFTER CONCLUSION: Check EVERY public endpoint ─────────────────────
+        public_endpoints_post = [
+            "/api/health",
+            "/api/topology",
+            "/api/runs",
+            f"/api/runs/{run_id}",
+            f"/api/runs/{run_id}/results",
+            "/api/log?limit=50",
+            "/api/verify",
+            "/api/verify/tamper-demo",
+            "/api/breakit/latest",
+            "/api/experiments/timing/latest",
+            "/api/cache-mode",
+        ]
+        for ep in public_endpoints_post:
+            resp = await client.get(ep)
+            assert resp.status_code in (200, 404, 429), f"Unexpected status for {ep}: {resp.status_code}"
+            for prefix in prefixes:
+                assert prefix not in resp.text, (
+                    f"LEAK AFTER CONCLUSION: prompt prefix '{prefix[:15]}...' leaked in {ep}!"
+                )
+
+        # ── ASSERT RESULTS ITEMS EXACT KEYS & VALUES ─────────────────────────
+        res_post = None
+        for _ in range(6):
+            res_post = await client.get(f"/api/runs/{run_id}/results")
+            if res_post.status_code == 200:
+                break
+            await asyncio.sleep(1.0)
+
+        assert res_post is not None
+        assert res_post.status_code == 200
+        results_data = res_post.json()
+
+        assert "attacks" in results_data
+        assert len(results_data["attacks"]) == num_attacks
+        for item in results_data["attacks"]:
+            assert set(item.keys()) == {"idx", "prompt_digest", "source", "category", "outcome", "latency_ms", "prompt_preview"}
+            assert "prompt" not in item, "LEAK: prompt found in public results item!"
+            assert "rule_id" not in item, "LEAK: rule_id found in public results item!"
+            assert item["source"] in ALLOWED_SOURCES, f"Unknown source: {item['source']}"
+            assert item["category"] in ALLOWED_CATEGORIES, f"Unknown category: {item['category']}"
+            if item["source"] == "advbench" or item["category"] == "harmful_behavior":
+                assert item["prompt_preview"] == "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
+        await _abort_any_active_run(client)
+

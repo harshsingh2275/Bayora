@@ -55,7 +55,7 @@ Each requirement has an ID used in tests and docs.
 - FR-07 Red commits to digests of its attack set; blue commits to a digest of its defense bundle; both are logged before the run starts.
 - FR-08 During a run, nothing about the other side's content is exposed through any API or log.
 - FR-09 Each attack is checked against its commitment, passed through blue's input rules, sent to the model, passed through output rules, and scored.
-- FR-10 On conclusion, results are revealed (blue gets prompts, outcomes and rule ids; red gets outcomes; the public gets counts and previews), and the logged `results_digest` matches the revealed data.
+- FR-10 On conclusion, results are revealed (blue gets prompts, outcomes and rule ids; red gets outcomes; the public gets counts and attack metadata: digests, source, category, outcome, latency; no prompt text), and the logged `results_digest` matches the revealed data.
 - FR-11 Scoring is a heuristic attack success rate (ASR), always labelled as heuristic.
 - FR-12 Red and blue agents run autonomously and only talk to the gateway.
 

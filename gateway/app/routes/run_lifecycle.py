@@ -34,6 +34,7 @@ from ..models import (
     AttackResponse,
     BlueAttackReport,
     BlueReportResponse,
+    CommitAttackItem,
     CommitRequest,
     CommitResponse,
     DefenseRequest,
@@ -264,10 +265,18 @@ async def red_commit(
         "VALUES (?, 'red', ?, ?, ?)",
         (run_id, body.count, body.set_digest, now_iso),
     )
+    attacks_meta = body.attacks
+    if attacks_meta is None:
+        attacks_meta = [
+            CommitAttackItem(idx=i, source="advbench", category="harmful_behavior")
+            for i in range(body.count)
+        ]
+
     for idx, digest in enumerate(body.digests):
+        meta = attacks_meta[idx]
         await db.execute(
-            "INSERT INTO red_committed_digests (run_id, idx, digest) VALUES (?, ?, ?)",
-            (run_id, idx, digest),
+            "INSERT INTO red_committed_digests (run_id, idx, digest, source, category) VALUES (?, ?, ?, ?, ?)",
+            (run_id, idx, digest, meta.source, meta.category),
         )
 
     # Check if blue has already committed
@@ -446,7 +455,7 @@ async def red_attack(
     # Verify SHA-256(prompt) matches committed digest
     prompt_digest = hashlib.sha256(body.prompt.encode("utf-8")).hexdigest()
     async with db.execute(
-        "SELECT digest FROM red_committed_digests WHERE run_id = ? AND idx = ?",
+        "SELECT digest, source, category FROM red_committed_digests WHERE run_id = ? AND idx = ?",
         (run_id, body.idx),
     ) as cur:
         row = await cur.fetchone()
@@ -455,6 +464,8 @@ async def red_attack(
                 status_code=409,
                 detail=f"Prompt digest does not match committed digest for idx {body.idx}",
             )
+        committed_source = row["source"] if ("source" in row.keys() and row["source"]) else "advbench"
+        committed_category = row["category"] if ("category" in row.keys() and row["category"]) else "harmful_behavior"
 
     # Retrieve sealed defense bundle
     async with db.execute(
@@ -527,8 +538,8 @@ async def red_attack(
     await db.execute(
         "INSERT INTO attacks ("
         "run_id, idx, prompt_digest, response_digest, outcome, latency_ms, "
-        "prompt, response_text, rule_id, created_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "prompt, response_text, rule_id, source, category, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,
             body.idx,
@@ -539,6 +550,8 @@ async def red_attack(
             body.prompt,
             response_text,
             rule_id,
+            committed_source,
+            committed_category,
             now_iso,
         ),
     )
@@ -611,7 +624,7 @@ async def red_done(
 
     # Compute results and aggregate counts
     async with db.execute(
-        "SELECT idx, prompt_digest, prompt, response_text, outcome, rule_id, latency_ms "
+        "SELECT idx, prompt_digest, prompt, response_text, outcome, rule_id, latency_ms, source, category "
         "FROM attacks WHERE run_id = ? ORDER BY idx ASC",
         (run_id,),
     ) as cur:
@@ -634,13 +647,35 @@ async def red_done(
     asr = round(complied / total, 4) if total > 0 else 0.0
 
     # Build canonical revealed results (matches GET /api/runs/{id}/results)
+    # SECURITY SI-08: idx, prompt_digest, source, category, outcome, latency_ms, prompt_preview
+    # Harmful datasets (AdvBench) are strictly masked to '[PROMPT REDACTED FOR PUBLIC VIEW]'
+    def _safe_preview(att_row: dict[str, Any]) -> str:
+        src = att_row.get("source") or "advbench"
+        cat = att_row.get("category") or "harmful_behavior"
+        if (
+            src in (
+                "advbench",
+                "advbench+roleplay",
+                "advbench+ignore_instructions",
+                "advbench+academic_research",
+                "advbench+system_override",
+                "advbench+hypothetical",
+            )
+            or cat == "harmful_behavior"
+        ):
+            return "[PROMPT REDACTED FOR PUBLIC VIEW]"
+        raw = att_row.get("prompt_preview") or att_row.get("prompt") or ""
+        return raw[:80] if raw else "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
     revealed_attacks = [
         {
             "idx": att["idx"],
             "prompt_digest": att["prompt_digest"],
-            "prompt_preview": att["prompt"][:80],  # first 80 chars preview
+            "source": att.get("source") or "advbench",
+            "category": att.get("category") or "harmful_behavior",
             "outcome": att["outcome"],
             "latency_ms": round(att["latency_ms"], 2) if att["latency_ms"] is not None else None,
+            "prompt_preview": _safe_preview(att),
         }
         for att in attack_rows
     ]
@@ -814,9 +849,11 @@ async def get_run_results(
 ) -> JSONResponse:
     """
     Public results endpoint.
-    SECURITY §5: 403 before conclusion.
-    Reveals summary counts, ASR, and per-attack idx, prompt_digest, 80-char preview,
-    outcome, latency_ms. Canonical representation matches results_digest in log.
+    SECURITY §5, SI-08: 403 before conclusion.
+    Reveals summary counts, ASR, and per-attack idx, prompt_digest, source, category,
+    outcome, latency_ms. No prompt text, no prompt preview, no rule ids, no responses.
+    Canonical representation matches results_digest in log.
+    Explicit response model with extra="forbid" ensures prompt text cannot leak in.
     """
     run = await get_run_with_timeout_check(db, run_id, logger)
     if not run or run["state"] != "concluded":
@@ -834,4 +871,26 @@ async def get_run_results(
             raise HTTPException(status_code=404, detail="Results not found")
         data = json.loads(row["results_json"])
 
-    return JSONResponse(status_code=200, content=data)
+    # SECURITY SI-08: Defense in depth - scrub any harmful preview text before public emission
+    if "attacks" in data and isinstance(data["attacks"], list):
+        for att in data["attacks"]:
+            src = att.get("source") or "advbench"
+            cat = att.get("category") or "harmful_behavior"
+            if (
+                src in (
+                    "advbench",
+                    "advbench+roleplay",
+                    "advbench+ignore_instructions",
+                    "advbench+academic_research",
+                    "advbench+system_override",
+                    "advbench+hypothetical",
+                )
+                or cat == "harmful_behavior"
+            ):
+                att["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
+            elif "prompt_preview" not in att or not att["prompt_preview"]:
+                att["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
+    # Explicitly validate against response_model with extra="forbid" (SI-06 / SI-08)
+    validated = RunResultsResponse.model_validate(data)
+    return JSONResponse(status_code=200, content=validated.model_dump())

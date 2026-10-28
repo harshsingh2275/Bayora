@@ -111,7 +111,7 @@ Auth header: `Authorization: Bearer <token>` for tenants; `X-Admin-Token: <token
 | Method and path | Role | Body / result |
 |---|---|---|
 | `GET /v1/{role}/work` | red or blue | `{"run": null}` or `{"run": {"run_id", "state", "params"}}`. Red params: `attack_count`, `seed`. Blue params: `bundle` (name). |
-| `POST /v1/red/runs/{run_id}/commit` | red | `{"count": int, "digests": [hex...], "set_digest": hex}`. `set_digest` = SHA-256 of the digests joined by `\n`. |
+| `POST /v1/red/runs/{run_id}/commit` | red | `{"count": int, "digests": [hex...], "set_digest": hex, "attacks": [{"idx": int, "source": str, "category": str}]}`. `set_digest` = SHA-256 of the digests joined by `\n`. `source` and `category` validated against allowlist. |
 | `PUT /v1/blue/runs/{run_id}/defense` | blue | `{"bundle": {...}}` validated per §7. Returns `{"bundle_digest"}`. |
 | `POST /v1/red/runs/{run_id}/attack` | red | `{"idx": int, "prompt": str(max 4000)}` returns `{"text": str, "blocked": bool}`. Gateway checks SHA-256(prompt) equals the committed digest for `idx`. |
 | `POST /v1/red/runs/{run_id}/done` | red | `{"sent": int}`. Triggers conclusion (§6). |
@@ -128,7 +128,7 @@ Responses to tenants contain only the fields listed. llama-server fields such as
 | `GET /api/health` | Service health summary (gateway, model, logger, verifier). |
 | `GET /api/topology` | Static description of networks and services for the architecture view. |
 | `GET /api/runs`, `GET /api/runs/{id}` | Run list and state, commitment digests, timeline. Never prompts or rules before conclusion. |
-| `GET /api/runs/{id}/results` | After conclusion: summary counts and per-attack `idx`, `prompt_digest`, `prompt_preview` (first 80 chars), `outcome`, `latency_ms`. No full model responses, no rule ids. Before conclusion: 403. |
+| `GET /api/runs/{id}/results` | After conclusion: summary counts and per-attack `idx`, `prompt_digest`, `source`, `category`, `outcome`, `latency_ms`, `prompt_preview` (harmful text masked to `[PROMPT REDACTED FOR PUBLIC VIEW]`). No raw prompt text, no full model responses, no rule ids. Explicit `extra="forbid"` schema. Before conclusion: 403. |
 | `GET /api/log?after=&limit=` | Audit entries (digests only). |
 | `GET /api/verify` | Proxies the verifier: full verification result. |
 | `GET /api/verify/tamper-demo` | Proxies the verifier's in-memory tamper demonstration (§8). |

@@ -52,9 +52,9 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
     },
     {
       id: 'SI-08',
-      title: 'Redaction Before Run Conclusion',
-      desc: 'No raw prompts, responses, or bundles in audit log or public API before run concludes. Slot/timing headers stripped.',
-      mechanism: 'gateway: digests-only event logging, public API filters out unsealed bodies',
+      title: 'Redaction Before Run Conclusion & Public Scrubbing',
+      desc: 'No raw prompts, responses, or bundles in audit log or public API before run concludes. Harmful AdvBench text scrubbed to [PROMPT REDACTED FOR PUBLIC VIEW] on public results. Slot/timing headers stripped.',
+      mechanism: 'gateway: digests-only event logging, public results prompt_preview redaction, strict model extra="forbid"',
     },
     {
       id: 'SI-09',
@@ -208,7 +208,7 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
             </ul>
           </div>
 
-          {/* Residual Risks & Non-Guarantees */}
+          {/* Residual Risks & Strict Honest Limitations */}
           <div
             style={{
               background: 'var(--bg-surface)',
@@ -235,7 +235,7 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
               }}
             >
               <AlertTriangleIcon size={16} />
-              <span>Residual Risks & Non-Guarantees</span>
+              <span>Strict Honest Limitations & Residual Risks</span>
             </div>
 
             <ul
@@ -252,26 +252,84 @@ export const ThreatModelView: React.FC<ThreatModelViewProps> = () => {
               }}
             >
               <li>
-                <strong style={{ color: 'var(--text-primary)' }}>Kernel & runtime escape:</strong> Containers share a single
-                Linux kernel; kernel zero-days or Docker daemon vulnerabilities would bypass isolation.
+                <strong style={{ color: 'var(--text-primary)' }}>Shared kernel risks (Containers != MicroVMs):</strong> Containers share a single Linux kernel on the host. Namespaces and cgroups provide process boundary isolation, not hardware-enforced virtualization. A host kernel privilege escalation or container escape bypasses all isolation.
               </li>
               <li>
-                <strong style={{ color: 'var(--text-primary)' }}>TCB compromise:</strong> Host operating system, Gateway, and
-                audit logger form the trusted base; compromising them breaks integrity.
+                <strong style={{ color: 'var(--text-primary)' }}>Absolute trust in Gateway & Logger:</strong> The Gateway and Logger form the core Trusted Computing Base (TCB). A compromise of the Gateway runtime collapses tenant isolation; the Logger is trusted to honestly append records.
               </li>
               <li>
-                <strong style={{ color: 'var(--text-primary)' }}>Black-box behavioral inference:</strong> Attackers observe
-                which requests are blocked, allowing behavioral inference of filter rules.
+                <strong style={{ color: 'var(--text-primary)' }}>Black-box behavioral inference:</strong> Red can infer active Blue defense rules through discrete outcomes (blocked input/output vs refused/complied), acting as an adaptive probing oracle despite sealed bundle files.
               </li>
               <li>
-                <strong style={{ color: 'var(--text-primary)' }}>Hardware resource contention timing:</strong> Heavy CPU load
-                can introduce general execution jitter between concurrent tenants.
+                <strong style={{ color: 'var(--text-primary)' }}>Shared CPU timing & hardware contention:</strong> While KV prefix-cache side-channels are mitigated in isolated mode, shared CPU execution contention (L1-L3 cache, memory bus, scheduler jitter) is not mitigated.
               </li>
               <li>
-                <strong style={{ color: 'var(--text-primary)' }}>Log tail truncation after latest checkpoint:</strong> Truncating
-                entries after the latest signed checkpoint requires an external witness anchor to detect.
+                <strong style={{ color: 'var(--text-primary)' }}>Log tail truncation undetectable without external anchor:</strong> Truncating recent log entries occurring after the latest signed checkpoint cannot be detected from the log file alone without an external head-hash anchor (Probe L2).
+              </li>
+              <li>
+                <strong style={{ color: 'var(--text-primary)' }}>Measurement topology (Host Localhost):</strong> Timing measurements were conducted from the host through localhost loopback. Real-world network jitter and TLS overhead in multi-party networks would add variance.
               </li>
             </ul>
+          </div>
+        </div>
+
+        {/* Cloud Host Environment & Docker Permission Model Banner */}
+        <div
+          style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-card)',
+            padding: 'var(--space-6)',
+            marginBottom: 'var(--space-10)',
+          }}
+        >
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--text-xs)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--accent-primary)',
+              marginBottom: 'var(--space-2)',
+            }}
+          >
+            Host Infrastructure & Permission Model
+          </div>
+          <h2
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: 'var(--text-lg)',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              margin: '0 0 var(--space-4) 0',
+            }}
+          >
+            Azure Environment & Runtime Security Context
+          </h2>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '1.25rem',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ background: 'var(--bg-subtle)', padding: 'var(--space-4)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Cloud VM Host</div>
+              Microsoft Azure Trusted Cloud Host running Linux (<code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>Standard_B2as_v2</code> SKU: AMD EPYC 7763, 2 vCPUs, 8 GiB RAM).
+            </div>
+            <div style={{ background: 'var(--bg-subtle)', padding: 'var(--space-4)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Burstable CPU Throttling</div>
+              B-series VMs operate on burst credits. Sustained high CPU load during inference can exhaust credits, triggering hypervisor-level throttling that increases timing variance.
+            </div>
+            <div style={{ background: 'var(--bg-subtle)', padding: 'var(--space-4)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Docker Permission Model</div>
+              Standard rootful Docker Engine (<code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>dockerd</code> running as root, user in <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>docker</code> group). Containerized workloads run non-root (<code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>10001:10001</code>) with all capabilities dropped.
+            </div>
           </div>
         </div>
 

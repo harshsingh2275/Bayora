@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from gateway.app.models import (
     AttackRequest,
+    CommitAttackItem,
     CommitRequest,
     DefenseBundle,
     DefenseRequest,
@@ -18,6 +19,8 @@ from gateway.app.models import (
     BundleRule,
     CacheModeRequest,
     CreateRunRequest,
+    RunResultAttackItem,
+    RunResultsResponse,
 )
 
 
@@ -112,6 +115,70 @@ class TestCommitRequest:
     def test_digest_wrong_length_rejected(self):
         with pytest.raises(ValidationError):
             CommitRequest(count=1, digests=["abc"], set_digest=self._valid_digest())
+
+    def test_valid_commit_with_attacks_metadata(self):
+        req = CommitRequest(
+            count=2,
+            digests=[self._valid_digest(), self._valid_digest()],
+            set_digest=self._valid_digest(),
+            attacks=[
+                CommitAttackItem(idx=0, source="advbench", category="harmful_behavior"),
+                CommitAttackItem(idx=1, source="gandalf", category="prompt_injection"),
+            ],
+        )
+        assert req.attacks is not None
+        assert req.attacks[0].source == "advbench"
+        assert req.attacks[1].category == "prompt_injection"
+
+    def test_commit_attacks_unknown_category_rejected(self):
+        with pytest.raises(ValidationError):
+            CommitRequest(
+                count=1,
+                digests=[self._valid_digest()],
+                set_digest=self._valid_digest(),
+                attacks=[{"idx": 0, "source": "advbench", "category": "unknown_category"}],
+            )
+
+    def test_commit_attacks_unknown_source_rejected(self):
+        with pytest.raises(ValidationError):
+            CommitRequest(
+                count=1,
+                digests=[self._valid_digest()],
+                set_digest=self._valid_digest(),
+                attacks=[{"idx": 0, "source": "unauthorized_source", "category": "fraud"}],
+            )
+
+    def test_commit_attacks_length_mismatch_rejected(self):
+        with pytest.raises(ValidationError):
+            CommitRequest(
+                count=2,
+                digests=[self._valid_digest(), self._valid_digest()],
+                set_digest=self._valid_digest(),
+                attacks=[{"idx": 0, "source": "advbench", "category": "fraud"}],
+            )
+
+    def test_commit_attacks_index_mismatch_rejected(self):
+        with pytest.raises(ValidationError):
+            CommitRequest(
+                count=2,
+                digests=[self._valid_digest(), self._valid_digest()],
+                set_digest=self._valid_digest(),
+                attacks=[
+                    {"idx": 0, "source": "advbench", "category": "fraud"},
+                    {"idx": 2, "source": "advbench", "category": "fraud"},
+                ],
+            )
+
+    def test_commit_attacks_extra_field_rejected(self):
+        with pytest.raises(ValidationError):
+            CommitRequest(
+                count=1,
+                digests=[self._valid_digest()],
+                set_digest=self._valid_digest(),
+                attacks=[
+                    {"idx": 0, "source": "advbench", "category": "fraud", "prompt": "leaked"}
+                ],
+            )
 
 
 # ── AttackRequest ─────────────────────────────────────────────────────────────
@@ -259,3 +326,76 @@ class TestCreateRunRequest:
     def test_unknown_field_rejected(self):
         with pytest.raises(ValidationError):
             CreateRunRequest(name="r", attack_count=5, seed=1, bundle="baseline", model="gpt-4")
+
+
+# ── RunResultsResponse & RunResultAttackItem ───────────────────────────────────
+
+class TestRunResultsResponse:
+    def _valid_item(self):
+        return {
+            "idx": 0,
+            "prompt_digest": "a" * 64,
+            "source": "advbench",
+            "category": "harmful_behavior",
+            "outcome": "blocked_input",
+            "latency_ms": 12.5,
+        }
+
+    def _valid_results(self):
+        return {
+            "run_id": "00000000-0000-0000-0000-000000000001",
+            "total": 1,
+            "aggregate": {
+                "blocked_input": 1,
+                "blocked_output": 0,
+                "refused": 0,
+                "complied": 0,
+                "error": 0,
+            },
+            "asr": 0.0,
+            "attacks": [self._valid_item()],
+        }
+
+    def test_valid_results_response(self):
+        resp = RunResultsResponse.model_validate(self._valid_results())
+        assert resp.total == 1
+        assert resp.attacks[0].source == "advbench"
+        assert resp.attacks[0].category == "harmful_behavior"
+
+    def test_harmful_prompt_preview_strictly_redacted(self):
+        """SECURITY SI-08: harmful dataset prompt_preview is strictly sanitized to [PROMPT REDACTED FOR PUBLIC VIEW]."""
+        item = self._valid_item()
+        item["prompt_preview"] = "Give detailed instructions on how to pick a lock"
+        validated = RunResultAttackItem.model_validate(item)
+        assert validated.prompt_preview == "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
+    def test_prompt_text_strictly_forbidden_on_item(self):
+        """SECURITY: prompt must trigger ValidationError via extra='forbid'."""
+        item = self._valid_item()
+        item["prompt"] = "sensitive leaked text"
+        with pytest.raises(ValidationError):
+            RunResultAttackItem.model_validate(item)
+
+    def test_results_attacks_harmful_preview_redacted(self):
+        data = self._valid_results()
+        data["attacks"][0]["prompt_preview"] = "sensitive advbench prompt"
+        resp = RunResultsResponse.model_validate(data)
+        assert resp.attacks[0].prompt_preview == "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
+    def test_unknown_source_rejected_on_item(self):
+        item = self._valid_item()
+        item["source"] = "invalid_src"
+        with pytest.raises(ValidationError):
+            RunResultAttackItem.model_validate(item)
+
+    def test_unknown_category_rejected_on_item(self):
+        item = self._valid_item()
+        item["category"] = "invalid_cat"
+        with pytest.raises(ValidationError):
+            RunResultAttackItem.model_validate(item)
+
+    def test_extra_top_level_field_rejected(self):
+        data = self._valid_results()
+        data["extra_leak"] = "secret"
+        with pytest.raises(ValidationError):
+            RunResultsResponse.model_validate(data)

@@ -8,8 +8,10 @@ No ORM; raw SQL keeps the schema readable for auditors.
 SECURITY: SQLite file lives on the gateway-data named volume, not in /tmp.
           No foreign service can mount this volume (architecture §4).
 """
-import aiosqlite
+import json
 import logging
+
+import aiosqlite
 
 from .config import DB_PATH
 
@@ -62,15 +64,19 @@ CREATE TABLE IF NOT EXISTS attacks (
     prompt          TEXT,            -- full prompt text (sealed)
     response_text   TEXT,            -- model response or refusal text (sealed)
     rule_id         TEXT,            -- rule id that triggered block, or NULL
+    source          TEXT NOT NULL DEFAULT 'advbench',
+    category        TEXT NOT NULL DEFAULT 'harmful_behavior',
     created_at      TEXT,
     PRIMARY KEY (run_id, idx)
 );
 
 -- red_committed_digests: individual prompt digests committed by red team
 CREATE TABLE IF NOT EXISTS red_committed_digests (
-    run_id TEXT NOT NULL REFERENCES runs(run_id),
-    idx    INTEGER NOT NULL,
-    digest TEXT NOT NULL,
+    run_id   TEXT NOT NULL REFERENCES runs(run_id),
+    idx      INTEGER NOT NULL,
+    digest   TEXT NOT NULL,
+    source   TEXT NOT NULL DEFAULT 'advbench',
+    category TEXT NOT NULL DEFAULT 'harmful_behavior',
     PRIMARY KEY (run_id, idx)
 );
 
@@ -125,17 +131,84 @@ async def init_db() -> aiosqlite.Connection:
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
     await conn.executescript(_SCHEMA)
-    # Ensure sealed columns exist on attacks if table was created previously
-    for col, col_type in [
-        ("prompt", "TEXT"),
-        ("response_text", "TEXT"),
-        ("rule_id", "TEXT"),
-        ("created_at", "TEXT"),
+    # Ensure sealed and metadata columns exist on attacks if table was created previously
+    for col, col_type, default_val in [
+        ("prompt", "TEXT", None),
+        ("response_text", "TEXT", None),
+        ("rule_id", "TEXT", None),
+        ("source", "TEXT", "'advbench'"),
+        ("category", "TEXT", "'harmful_behavior'"),
+        ("created_at", "TEXT", None),
     ]:
         try:
-            await conn.execute(f"ALTER TABLE attacks ADD COLUMN {col} {col_type}")
+            default_clause = f" DEFAULT {default_val}" if default_val else ""
+            await conn.execute(f"ALTER TABLE attacks ADD COLUMN {col} {col_type}{default_clause}")
         except Exception:
             pass
+
+    for col, col_type, default_val in [
+        ("source", "TEXT", "'advbench'"),
+        ("category", "TEXT", "'harmful_behavior'"),
+    ]:
+        try:
+            default_clause = f" DEFAULT {default_val}" if default_val else ""
+            await conn.execute(f"ALTER TABLE red_committed_digests ADD COLUMN {col} {col_type}{default_clause}")
+        except Exception:
+            pass
+
+    # Backfill any existing attacks that have NULL source or category
+    try:
+        await conn.execute("UPDATE attacks SET source = 'advbench' WHERE source IS NULL")
+        await conn.execute("UPDATE attacks SET category = 'harmful_behavior' WHERE category IS NULL")
+        await conn.execute("UPDATE red_committed_digests SET source = 'advbench' WHERE source IS NULL")
+        await conn.execute("UPDATE red_committed_digests SET category = 'harmful_behavior' WHERE category IS NULL")
+    except Exception:
+        pass
+
+    # Ensure run_results does not leak harmful prompt_preview in stored historical JSON
+    try:
+        async with conn.execute("SELECT run_id, results_json FROM run_results") as cur:
+            rows = await cur.fetchall()
+        for row in rows:
+            r_id = row["run_id"]
+            raw_json = row["results_json"]
+            try:
+                parsed = json.loads(raw_json)
+                changed = False
+                if "attacks" in parsed and isinstance(parsed["attacks"], list):
+                    for a in parsed["attacks"]:
+                        src = a.get("source") or "advbench"
+                        cat = a.get("category") or "harmful_behavior"
+                        a["source"] = src
+                        a["category"] = cat
+                        if (
+                            src in (
+                                "advbench",
+                                "advbench+roleplay",
+                                "advbench+ignore_instructions",
+                                "advbench+academic_research",
+                                "advbench+system_override",
+                                "advbench+hypothetical",
+                            )
+                            or cat == "harmful_behavior"
+                        ):
+                            if a.get("prompt_preview") != "[PROMPT REDACTED FOR PUBLIC VIEW]":
+                                a["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
+                                changed = True
+                        elif "prompt_preview" not in a or not a["prompt_preview"]:
+                            a["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
+                            changed = True
+                if changed:
+                    cleaned_json = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                    await conn.execute(
+                        "UPDATE run_results SET results_json = ? WHERE run_id = ?",
+                        (cleaned_json, r_id),
+                    )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     await conn.commit()
     log.info({"event": "db_initialized", "path": DB_PATH})
     return conn

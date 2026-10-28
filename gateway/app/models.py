@@ -13,9 +13,13 @@ import regex
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+from .taxonomies import AttackCategory, AttackSource
+
+
 # ── Shared base: SECURITY SI-06 – every request forbids extra fields ─────────
 class StrictBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
 
 
 # ── Probe endpoint (/v1/red/probe, /v1/blue/probe) ────────────────────────────
@@ -46,10 +50,29 @@ class WorkResponse(BaseModel):
 
 # ── Commit endpoint (/v1/red/runs/{run_id}/commit) ───────────────────────────
 
+class CommitAttackItem(StrictBase):
+    idx: Annotated[int, Field(ge=0, le=99)]
+    source: AttackSource
+    category: AttackCategory
+
+
 class CommitRequest(StrictBase):
     count: Annotated[int, Field(ge=1, le=100)]
     digests: list[Annotated[str, Field(min_length=64, max_length=64)]]
     set_digest: Annotated[str, Field(min_length=64, max_length=64)]
+    attacks: list[CommitAttackItem] | None = None
+
+    @model_validator(mode="after")
+    def validate_attacks(self) -> "CommitRequest":
+        if len(self.digests) != self.count:
+            raise ValueError(f"digests count {len(self.digests)} does not match count {self.count}")
+        if self.attacks is not None:
+            if len(self.attacks) != self.count:
+                raise ValueError(f"attacks count {len(self.attacks)} does not match count {self.count}")
+            for expected_idx, atk in enumerate(self.attacks):
+                if atk.idx != expected_idx:
+                    raise ValueError(f"attacks[{expected_idx}].idx is {atk.idx}, expected {expected_idx}")
+        return self
 
 
 class CommitResponse(BaseModel):
@@ -157,16 +180,48 @@ class BlueReportResponse(BaseModel):
 
 # ── Results (/api/runs/{run_id}/results) ──────────────────────────────────────
 
-class RunResultAttackItem(BaseModel):
-    """SECURITY §5: Prompt preview max 80 chars, outcome, latency; no full response, no rule_id."""
+REDACTED_PROMPT_PREVIEW = "[PROMPT REDACTED FOR PUBLIC VIEW]"
+
+
+class RunResultAttackItem(StrictBase):
+    """
+    SECURITY SI-08: idx, prompt_digest, source, category, outcome, latency_ms, prompt_preview.
+    Harmful dataset text (e.g. AdvBench) is strictly masked to '[PROMPT REDACTED FOR PUBLIC VIEW]'.
+    Raw prompt text ('prompt') and internal defense rule IDs ('rule_id') remain strictly forbidden.
+    """
     idx: int
     prompt_digest: str
-    prompt_preview: str
+    source: AttackSource
+    category: AttackCategory
     outcome: str
     latency_ms: float | None = None
+    prompt_preview: str = REDACTED_PROMPT_PREVIEW
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_preview(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            src = data.get("source")
+            cat = data.get("category")
+            # SECURITY: Strictly scrub harmful datasets
+            if (
+                src in (
+                    "advbench",
+                    "advbench+roleplay",
+                    "advbench+ignore_instructions",
+                    "advbench+academic_research",
+                    "advbench+system_override",
+                    "advbench+hypothetical",
+                )
+                or cat == "harmful_behavior"
+            ):
+                data["prompt_preview"] = REDACTED_PROMPT_PREVIEW
+            elif "prompt_preview" not in data or not data["prompt_preview"]:
+                data["prompt_preview"] = REDACTED_PROMPT_PREVIEW
+        return data
 
 
-class RunResultsResponse(BaseModel):
+class RunResultsResponse(StrictBase):
     run_id: str
     total: int
     aggregate: dict[str, int]

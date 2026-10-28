@@ -21,15 +21,55 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+from gateway.app.taxonomies import ALLOWED_CATEGORIES, ALLOWED_SOURCES
+
 DATA_DIR = REPO_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 RED_DIR = DATA_DIR / "red"
 OUTPUT_FILE = RED_DIR / "pool.jsonl"
+
+# Term matchers for excluding child sexual abuse or exploitation (CSAM / CSAE)
+_MINORS_REGEX = re.compile(
+    r"\b(child|children|minor|minors|underage|under-age|kid|kids|toddler|toddlers|"
+    r"infant|infants|baby|babies|teen|teens|teenager|teenagers|preteen|preteens|"
+    r"pre-teen|adolescent|adolescents|youth|juvenile|schoolgirl|schoolboy|daughter|"
+    r"son|nephew|niece)\b",
+    re.IGNORECASE,
+)
+_SEXUAL_EXPLOIT_REGEX = re.compile(
+    r"\b(sex|sexual|sexually|sexy|nude|naked|nudity|porn|porno|pornography|"
+    r"pornographic|erotic|erotica|intimate|abuse|abusing|abused|exploit|"
+    r"exploiting|exploited|exploitation|solicit|solicitation|traffick|"
+    r"trafficking|trafficked|assault|violate|violating|rape|raping|raped|"
+    r"seduce|seducing|seduction|lewd|intercourse|fondle|fondling|fondled|"
+    r"touching|touch|orgy|strip|stripping|penetrat\w*|voyeur\w*|incest)\b",
+    re.IGNORECASE,
+)
+_STANDALONE_EXCLUDE_REGEX = re.compile(
+    r"\b(pedophil\w*|paedophil\w*|molest\w*|grooming|csam|csae|pederast\w*|cp)\b",
+    re.IGNORECASE,
+)
+
+
+def is_csam_csae_prompt(prompt: str) -> bool:
+    """
+    Check if a prompt involves child sexual abuse or exploitation (CSAM/CSAE).
+    Matches on clear terms such as child, minor, underage, kid combined with
+    sexual terms, plus terms like molest, grooming, pedophil, CSAM.
+    Conservative: when in doubt, exclude.
+    """
+    if _STANDALONE_EXCLUDE_REGEX.search(prompt):
+        return True
+    if _MINORS_REGEX.search(prompt) and _SEXUAL_EXPLOIT_REGEX.search(prompt):
+        return True
+    return False
 
 # Generic wrapper templates for role-play and injection framing (§7, P-06)
 WRAPPER_TEMPLATES = [
@@ -119,9 +159,10 @@ def print_missing_error(missing_items: list[str]) -> None:
     sys.stderr.write("=" * 72 + "\n\n")
 
 
-def parse_advbench(file_path: Path) -> list[dict[str, Any]]:
-    """Parse AdvBench harmful_behaviors.csv."""
+def parse_advbench(file_path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Parse AdvBench harmful_behaviors.csv, filtering out CSAM/CSAE prompts."""
     records: list[dict[str, Any]] = []
+    dropped_count = 0
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
         for idx, row in enumerate(reader, start=1):
@@ -131,18 +172,22 @@ def parse_advbench(file_path: Path) -> list[dict[str, Any]]:
             if prompt:
                 prompt = prompt.strip()
                 if prompt:
+                    if is_csam_csae_prompt(prompt):
+                        dropped_count += 1
+                        continue
                     records.append({
                         "id": f"advbench-{idx:04d}",
                         "source": "advbench",
                         "category": "harmful_behavior",
                         "prompt": prompt,
                     })
-    return records
+    return records, dropped_count
 
 
-def parse_gandalf(file_path: Path) -> list[dict[str, Any]]:
-    """Parse Lakera Gandalf ignore-instructions export (CSV or JSON/JSONL)."""
+def parse_gandalf(file_path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Parse Lakera Gandalf ignore-instructions export (CSV or JSON/JSONL), filtering out CSAM/CSAE prompts."""
     records: list[dict[str, Any]] = []
+    dropped_count = 0
     suffix = file_path.suffix.lower()
 
     if suffix == ".csv":
@@ -160,6 +205,9 @@ def parse_gandalf(file_path: Path) -> list[dict[str, Any]]:
                 if prompt:
                     prompt = prompt.strip()
                     if prompt:
+                        if is_csam_csae_prompt(prompt):
+                            dropped_count += 1
+                            continue
                         records.append({
                             "id": f"gandalf-{idx:04d}",
                             "source": "gandalf",
@@ -200,6 +248,9 @@ def parse_gandalf(file_path: Path) -> list[dict[str, Any]]:
                     if prompt and isinstance(prompt, str):
                         prompt = prompt.strip()
                         if prompt:
+                            if is_csam_csae_prompt(prompt):
+                                dropped_count += 1
+                                continue
                             records.append({
                                 "id": f"gandalf-{idx:04d}",
                                 "source": "gandalf",
@@ -208,7 +259,7 @@ def parse_gandalf(file_path: Path) -> list[dict[str, Any]]:
                             })
                             idx += 1
 
-    return records
+    return records, dropped_count
 
 
 def build_pool(
@@ -223,6 +274,10 @@ def build_pool(
     seen_prompts: set[str] = set()
 
     def add_record(rec: dict[str, Any]) -> bool:
+        if is_csam_csae_prompt(rec["prompt"]):
+            return False
+        assert rec["source"] in ALLOWED_SOURCES, f"Unknown source: {rec['source']}"
+        assert rec["category"] in ALLOWED_CATEGORIES, f"Unknown category: {rec['category']}"
         normalized = rec["prompt"].strip().lower()
         if normalized in seen_prompts:
             return False
@@ -239,7 +294,6 @@ def build_pool(
         add_record(rec)
 
     # 3. Add wrapped variants of selected AdvBench prompts
-    # Takes a selection of AdvBench prompts and applies wrapper templates
     wrapped_candidates = advbench_records[:30]
     for orig in wrapped_candidates:
         for t_name, t_cat, t_template in WRAPPER_TEMPLATES:
@@ -285,11 +339,11 @@ def main() -> int:
     print(f"[*] Found AdvBench file: {advbench_file}")
     print(f"[*] Found Gandalf file:  {gandalf_file}")
 
-    advbench_records = parse_advbench(advbench_file)
-    print(f"[*] Loaded {len(advbench_records)} AdvBench records")
+    advbench_records, advbench_dropped = parse_advbench(advbench_file)
+    print(f"[*] AdvBench: loaded {len(advbench_records)} records (dropped {advbench_dropped} CSAM/CSAE rows, counts only, prompts withheld)")
 
-    gandalf_records = parse_gandalf(gandalf_file)
-    print(f"[*] Loaded {len(gandalf_records)} Gandalf records")
+    gandalf_records, gandalf_dropped = parse_gandalf(gandalf_file)
+    print(f"[*] Gandalf:  loaded {len(gandalf_records)} records (dropped {gandalf_dropped} CSAM/CSAE rows, counts only, prompts withheld)")
 
     if not advbench_records:
         sys.stderr.write("ERROR: No valid records parsed from AdvBench file.\n")

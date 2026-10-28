@@ -64,6 +64,8 @@ export interface AttackResult {
   latency_ms: number;
   outcome: "blocked_input" | "blocked_output" | "refused" | "complied" | "error";
   prompt_digest: string;
+  source: string;
+  category: string;
   prompt_preview: string;
 }
 

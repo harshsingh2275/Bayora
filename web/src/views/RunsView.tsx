@@ -490,7 +490,9 @@ const RunDetailPanel: React.FC<RunDetailProps> = ({
                 <thead>
                   <tr>
                     <th style={{ whiteSpace: 'nowrap' }}>#</th>
-                    <th style={{ whiteSpace: 'nowrap', minWidth: 220 }}>Prompt Preview</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Source</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: 160 }}>Category</th>
+                    <th style={{ minWidth: 200 }}>Prompt Preview</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Outcome</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Latency</th>
                     {isAuthenticated && <th style={{ whiteSpace: 'nowrap' }}>Full Item</th>}
@@ -500,10 +502,16 @@ const RunDetailPanel: React.FC<RunDetailProps> = ({
                   {pagedItems.map((atk) => (
                     <tr key={atk.idx}>
                       <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{atk.idx}</td>
-                      <td style={{ minWidth: 220 }}>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
-                          {atk.prompt_preview || '—'}
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: 'var(--radius-sm)' }}>
+                          {atk.source || '—'}
                         </span>
+                      </td>
+                      <td style={{ minWidth: 160, whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                        {atk.category || '—'}
+                      </td>
+                      <td style={{ minWidth: 200, fontSize: 'var(--text-xs)', color: atk.prompt_preview?.includes('REDACTED') ? 'var(--text-muted)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        {atk.prompt_preview || '—'}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <OutcomePill outcome={atk.outcome} />
