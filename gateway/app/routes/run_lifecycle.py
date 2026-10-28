@@ -871,24 +871,21 @@ async def get_run_results(
             raise HTTPException(status_code=404, detail="Results not found")
         data = json.loads(row["results_json"])
 
-    # SECURITY SI-08: Defense in depth - scrub any harmful preview text before public emission
+    # SECURITY SI-08: Defense in depth — scrub any harmful preview text before public emission.
+    # Fail-closed: null/unknown source or category is treated as harmful and redacted.
+    # This covers historical rows where source/category were not yet stored.
+    _PUBLIC_SAFE_SOURCES: frozenset[str] = frozenset()  # no public-safe sources currently
     if "attacks" in data and isinstance(data["attacks"], list):
         for att in data["attacks"]:
-            src = att.get("source") or "advbench"
-            cat = att.get("category") or "harmful_behavior"
-            if (
-                src in (
-                    "advbench",
-                    "advbench+roleplay",
-                    "advbench+ignore_instructions",
-                    "advbench+academic_research",
-                    "advbench+system_override",
-                    "advbench+hypothetical",
-                )
+            src = att.get("source") or ""
+            cat = att.get("category") or ""
+            is_harmful = (
+                not src
+                or src not in _PUBLIC_SAFE_SOURCES
+                or not cat
                 or cat == "harmful_behavior"
-            ):
-                att["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
-            elif "prompt_preview" not in att or not att["prompt_preview"]:
+            )
+            if is_harmful or not att.get("prompt_preview"):
                 att["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
 
     # Explicitly validate against response_model with extra="forbid" (SI-06 / SI-08)

@@ -510,8 +510,16 @@ const RunDetailPanel: React.FC<RunDetailProps> = ({
                       <td style={{ minWidth: 160, whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
                         {atk.category || '—'}
                       </td>
-                      <td style={{ minWidth: 200, fontSize: 'var(--text-xs)', color: atk.prompt_preview?.includes('REDACTED') ? 'var(--text-muted)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                        {atk.prompt_preview || '—'}
+                      <td style={{ minWidth: 200, fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                        {/* SECURITY SI-08: frontend safety net — never render raw prompt text publicly.
+                            Any preview longer than 40 chars that isn't already the redacted placeholder
+                            is treated as potentially harmful and masked. The backend is the authoritative
+                            redaction layer; this is defence-in-depth only. */}
+                        {(atk.prompt_preview != null &&
+                          atk.prompt_preview.length > 40 &&
+                          !atk.prompt_preview.includes('REDACTED'))
+                          ? '[PROMPT REDACTED FOR PUBLIC VIEW]'
+                          : (atk.prompt_preview || '—')}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <OutcomePill outcome={atk.outcome} />

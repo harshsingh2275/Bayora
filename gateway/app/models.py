@@ -201,23 +201,38 @@ class RunResultAttackItem(StrictBase):
     @classmethod
     def sanitize_preview(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            src = data.get("source")
-            cat = data.get("category")
-            # SECURITY: Strictly scrub harmful datasets
-            if (
-                src in (
-                    "advbench",
-                    "advbench+roleplay",
-                    "advbench+ignore_instructions",
-                    "advbench+academic_research",
-                    "advbench+system_override",
-                    "advbench+hypothetical",
-                )
-                or cat == "harmful_behavior"
-            ):
+            src = data.get("source") or ""
+            cat = data.get("category") or ""
+            # SECURITY SI-08: Fail-closed redaction.
+            # Null / unknown source or category is treated as harmful and redacted.
+            # This prevents null-source records (stored before the source column
+            # existed) from leaking raw prompt text.
+            _SAFE_SOURCES: frozenset[str] = frozenset()  # no public sources currently
+            _HARMFUL_SOURCES: frozenset[str] = frozenset({
+                "advbench",
+                "advbench+roleplay",
+                "advbench+ignore_instructions",
+                "advbench+academic_research",
+                "advbench+system_override",
+                "advbench+hypothetical",
+            })
+            is_harmful = (
+                not src                        # null / empty source → unknown → redact
+                or src not in _SAFE_SOURCES    # not explicitly safe → redact
+                or src in _HARMFUL_SOURCES     # explicitly harmful → redact
+                or not cat                     # null / empty category → unknown → redact
+                or cat == "harmful_behavior"   # explicitly harmful category → redact
+            )
+            if is_harmful or not data.get("prompt_preview"):
                 data["prompt_preview"] = REDACTED_PROMPT_PREVIEW
-            elif "prompt_preview" not in data or not data["prompt_preview"]:
-                data["prompt_preview"] = REDACTED_PROMPT_PREVIEW
+            # SECURITY: Backfill source/category to safe defaults when null so that
+            # Pydantic required-field validation doesn't 500 on legacy rows written
+            # before these columns existed. Unknown source/category is always treated
+            # as the most-harmful class (advbench / harmful_behavior).
+            if not data.get("source"):
+                data["source"] = "advbench"
+            if not data.get("category"):
+                data["category"] = "harmful_behavior"
         return data
 
 

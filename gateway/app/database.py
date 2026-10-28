@@ -165,7 +165,10 @@ async def init_db() -> aiosqlite.Connection:
     except Exception:
         pass
 
-    # Ensure run_results does not leak harmful prompt_preview in stored historical JSON
+    # SECURITY SI-08: Ensure run_results does not leak harmful prompt_preview in stored historical JSON.
+    # Fail-closed: null/empty source or category is treated as harmful and redacted.
+    # This covers rows written before the source/category columns existed.
+    _DB_SAFE_SOURCES: frozenset = frozenset()  # no public-safe sources currently
     try:
         async with conn.execute("SELECT run_id, results_json FROM run_results") as cur:
             rows = await cur.fetchall()
@@ -177,27 +180,19 @@ async def init_db() -> aiosqlite.Connection:
                 changed = False
                 if "attacks" in parsed and isinstance(parsed["attacks"], list):
                     for a in parsed["attacks"]:
-                        src = a.get("source") or "advbench"
-                        cat = a.get("category") or "harmful_behavior"
-                        a["source"] = src
-                        a["category"] = cat
-                        if (
-                            src in (
-                                "advbench",
-                                "advbench+roleplay",
-                                "advbench+ignore_instructions",
-                                "advbench+academic_research",
-                                "advbench+system_override",
-                                "advbench+hypothetical",
-                            )
+                        src = a.get("source") or ""
+                        cat = a.get("category") or ""
+                        # Fail-closed: unknown source/category -> treat as harmful
+                        is_harmful = (
+                            not src
+                            or src not in _DB_SAFE_SOURCES
+                            or not cat
                             or cat == "harmful_behavior"
-                        ):
+                        )
+                        if is_harmful or not a.get("prompt_preview"):
                             if a.get("prompt_preview") != "[PROMPT REDACTED FOR PUBLIC VIEW]":
                                 a["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
                                 changed = True
-                        elif "prompt_preview" not in a or not a["prompt_preview"]:
-                            a["prompt_preview"] = "[PROMPT REDACTED FOR PUBLIC VIEW]"
-                            changed = True
                 if changed:
                     cleaned_json = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
                     await conn.execute(
