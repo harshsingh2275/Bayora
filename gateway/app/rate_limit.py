@@ -48,6 +48,16 @@ class TokenBucket:
 # ── Tenant buckets (keyed by role: 'red' | 'blue') ──────────────────────────
 _tenant_buckets: dict[str, TokenBucket] = {}
 
+
+def reset_buckets_for_testing() -> None:
+    """Clear all in-memory buckets so tests start with a full quota.
+
+    SECURITY: never call this from production paths — only imported by tests.
+    """
+    _tenant_buckets.clear()
+    _public_buckets.clear()
+    _heavy_buckets.clear()
+
 def _get_tenant_bucket(role: str) -> TokenBucket:
     from .config import RATE_LIMIT_TENANT_PER_SEC
     if role not in _tenant_buckets:

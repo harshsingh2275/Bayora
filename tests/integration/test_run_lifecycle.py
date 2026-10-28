@@ -95,6 +95,12 @@ async def app_client(monkeypatch) -> AsyncGenerator[tuple[AsyncClient, Recording
     monkeypatch.setattr(model_client, "call_model", mock_call_model)
     monkeypatch.setattr(model_client, "erase_slot", mock_erase_slot)
 
+    # Reset rate-limit buckets so each test starts with a full quota.
+    # The buckets are module-level globals; without this, earlier tests that
+    # make many requests exhaust the bucket and cause spurious 429s in later tests.
+    from gateway.app import rate_limit as _rl
+    _rl.reset_buckets_for_testing()
+
     rec_logger = RecordingLoggerClient()
 
     async with lifespan(app):
